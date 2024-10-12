@@ -144,10 +144,10 @@ def page_setting():
             if selected_refer_mode != load_key("gpt_sovits.refer_mode"):
                 update_key("gpt_sovits.refer_mode", selected_refer_mode)
 
-        original_volume_options = {gls("mute"): 0, "10%": 0.1}
+        original_volume_options = {"mute": 0, "10%": 0.1}
 
         selected_original_volume = st.selectbox(
-            gls("original_volume"),
+            "Original Volume",
             options=list(original_volume_options.keys()),
             index=list(original_volume_options.values()).index(load_key("original_volume"))
         )
