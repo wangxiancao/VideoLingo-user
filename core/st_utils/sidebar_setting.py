@@ -84,7 +84,7 @@ def page_setting():
             update_key("burn_subtitles", burn_subtitles)
             st.rerun()
     with st.expander(t("Dubbing Settings"), expanded=True):
-        tts_methods = ["azure_tts", "openai_tts", "fish_tts", "sf_fish_tts", "edge_tts", "gpt_sovits", "custom_tts", "sf_cosyvoice2", "f5tts"]
+        tts_methods = ["azure_tts", "azure_direct_tts", "openai_tts", "fish_tts", "sf_fish_tts", "edge_tts", "gpt_sovits", "custom_tts", "sf_cosyvoice2", "f5tts"]
         select_tts = st.selectbox(t("TTS Method"), options=tts_methods, index=tts_methods.index(load_key("tts_method")))
         if select_tts != load_key("tts_method"):
             update_key("tts_method", select_tts)
@@ -126,6 +126,11 @@ def page_setting():
         elif select_tts == "azure_tts":
             config_input("302ai API", "azure_tts.api_key")
             config_input(t("Azure Voice"), "azure_tts.voice")
+
+        elif select_tts == "azure_direct_tts":
+            config_input(t("Azure Speech Key"), "azure_direct_tts.api_key")
+            config_input(t("Azure Region"), "azure_direct_tts.region", help="e.g. eastus, westeurope, eastasia")
+            config_input(t("Azure Voice"), "azure_direct_tts.voice")
         
         elif select_tts == "gpt_sovits":
             st.info(t("Please refer to Github homepage for GPT_SoVITS configuration"))

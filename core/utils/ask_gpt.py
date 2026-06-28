@@ -2,6 +2,7 @@ import os
 import json
 from threading import Lock
 import json_repair
+import httpx
 from openai import OpenAI
 from core.utils.config_utils import load_key
 from rich import print as rprint
@@ -56,7 +57,10 @@ def ask_gpt(prompt, resp_type=None, valid_def=None, log_title="default"):
         base_url = "https://ark.cn-beijing.volces.com/api/v3" # huoshan base url
     elif 'v1' not in base_url:
         base_url = base_url.strip('/') + '/v1'
-    client = OpenAI(api_key=load_key("api.key"), base_url=base_url)
+
+    # Bypass SOCKS proxy (httpx doesn't support socks:// without socksio)
+    http_client = httpx.Client(proxy=None, transport=httpx.HTTPTransport())
+    client = OpenAI(api_key=load_key("api.key"), base_url=base_url, http_client=http_client)
     response_format = {"type": "json_object"} if resp_type == "json" and load_key("api.llm_support_json") else None
 
     messages = [{"role": "user", "content": prompt}]
