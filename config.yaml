@@ -70,7 +70,7 @@ reflect_translate: true
 pause_before_translate: false
 
 ## ======================== Dubbing Settings ======================== ##
-# TTS selection [sf_fish_tts, openai_tts, gpt_sovits, azure_tts, azure_direct_tts, fish_tts, edge_tts, custom_tts]
+# TTS selection [sf_fish_tts, openai_tts, gpt_sovits, azure_tts, azure_direct_tts, fish_tts, edge_tts, custom_tts, indextts2]
 tts_method: 'azure_tts'
 
 # SiliconFlow FishTTS
@@ -124,6 +124,24 @@ gpt_sovits:
 
 f5tts:
   302_api: 'YOUR_302_API_KEY'
+
+# IndexTTS2 local worker configuration
+indextts2:
+  repo_dir: 'external/index-tts'
+  host: '127.0.0.1'
+  port: 18721
+  reference_mode: 'videolingo'
+  reference_audio: 'output/audio/refers/1.wav'
+  preset_voice: 'female'
+  preset_voices:
+    female: 'external/index-tts/examples/voice_09.wav'
+    male: 'external/index-tts/examples/voice_01.wav'
+  custom_reference_audio: ''
+  use_fp16: true
+  use_cuda_kernel: false
+  use_deepspeed: false
+  startup_timeout: 180
+  request_timeout: 300
 
 # *Audio speed range
 speed_factor:
