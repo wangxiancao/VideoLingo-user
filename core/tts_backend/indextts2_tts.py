@@ -6,7 +6,6 @@ from pathlib import Path
 import requests
 
 from core.utils import load_key, rprint
-from core.utils.models import _8_1_AUDIO_TASK, _VOCAL_AUDIO_FILE
 
 
 WORKER_PROCESS = None
@@ -113,56 +112,12 @@ def _start_worker():
     )
 
 
-def _missing_upstream_files():
-    expected = [
-        "output/audio/trans_subs_for_audio.srt",
-        "output/audio/src_subs_for_audio.srt",
-        _8_1_AUDIO_TASK,
-        _VOCAL_AUDIO_FILE,
-    ]
-    return [path for path in expected if not _resolve_path(path).exists()]
-
-
-def _resolve_videolingo_reference():
-    reference = _resolve_path(load_key("indextts2.reference_audio"))
-    if reference.exists():
-        return reference
-
-    task_file = _resolve_path(_8_1_AUDIO_TASK)
-    vocal_file = _resolve_path(_VOCAL_AUDIO_FILE)
-    if task_file.exists() and vocal_file.exists():
-        from core._9_refer_audio import extract_refer_audio_main
-
-        extract_refer_audio_main()
-        if reference.exists():
-            return reference
-
-    missing = _missing_upstream_files()
-    raise FileNotFoundError(
-        "IndexTTS2 VideoLingo reference audio is missing and cannot be generated. "
-        f"Expected reference: {reference}. Missing upstream files: {missing}. "
-        "Run subtitle/audio task processing first, or set indextts2.reference_mode to preset/custom."
-    )
-
-
 def _resolve_reference_audio():
-    mode = load_key("indextts2.reference_mode")
-    if mode == "videolingo":
-        reference = _resolve_videolingo_reference()
-    elif mode == "preset":
-        preset_voice = load_key("indextts2.preset_voice")
-        preset_voices = load_key("indextts2.preset_voices")
-        if preset_voice not in preset_voices:
-            raise ValueError(f"Unknown IndexTTS2 preset voice: {preset_voice}")
-        reference = _resolve_path(preset_voices[preset_voice])
-    elif mode == "custom":
-        custom_reference = load_key("indextts2.custom_reference_audio")
-        if not custom_reference:
-            raise ValueError("indextts2.custom_reference_audio is empty")
-        reference = _resolve_path(custom_reference)
-    else:
-        raise ValueError("indextts2.reference_mode must be one of: videolingo, preset, custom")
-
+    preset_voice = load_key("indextts2.preset_voice")
+    preset_voices = load_key("indextts2.preset_voices")
+    if preset_voice not in preset_voices:
+        raise ValueError(f"Unknown IndexTTS2 preset voice: {preset_voice}")
+    reference = _resolve_path(preset_voices[preset_voice])
     if not reference.exists():
         raise FileNotFoundError(f"IndexTTS2 reference audio not found: {reference}")
     return reference

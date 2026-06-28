@@ -28,13 +28,10 @@ indextts2:
   repo_dir: 'external/index-tts'
   host: '127.0.0.1'
   port: 18721
-  reference_mode: 'videolingo'
-  reference_audio: 'output/audio/refers/1.wav'
   preset_voice: 'female'
   preset_voices:
     female: 'external/index-tts/examples/voice_09.wav'
     male: 'external/index-tts/examples/voice_01.wav'
-  custom_reference_audio: ''
   use_fp16: true
   use_cuda_kernel: false
   use_deepspeed: false
@@ -58,15 +55,9 @@ IndexTTS2(
 )
 ```
 
-For each subtitle line, the adapter sends `text`, `output_path`, and a resolved `spk_audio_prompt` to `/synthesize`. The worker writes the WAV file directly to `output_path`. VideoLingo then keeps its existing duration check, retry, speed adjustment, and merge behavior.
+For each subtitle line, the adapter sends `text`, `output_path`, and the configured preset `spk_audio_prompt` to `/synthesize`. The worker writes the WAV file directly to `output_path`. VideoLingo then keeps its existing duration check, retry, speed adjustment, and merge behavior.
 
-Reference audio resolution:
-
-- `reference_mode: 'videolingo'`: use `output/audio/refers/1.wav`. If missing, the adapter may call `extract_refer_audio_main()` only when upstream audio task data and vocal audio already exist. If the subtitle/audio-task pipeline has not run, it raises a clear error explaining that `output/audio/trans_subs_for_audio.srt`, `output/audio/src_subs_for_audio.srt`, `output/audio/tts_tasks.xlsx`, or `output/audio/vocal.mp3` is missing.
-- `reference_mode: 'preset'`: use one of the project-owned preset samples from `preset_voices`, selected by `preset_voice`. This supports standalone worker testing and dubbing when no VideoLingo reference segment exists.
-- `reference_mode: 'custom'`: use `custom_reference_audio`, an explicit local WAV or MP3 path provided by the user.
-
-The adapter must validate that the resolved reference file exists before calling the worker. It must raise a clear error and must not silently fall back to cloud TTS.
+Reference audio is intentionally limited to preset voices. The adapter resolves `preset_voice` through `preset_voices`, validates that the preset reference file exists, and sends that file to the worker. VideoLingo voice extraction and custom reference audio are out of scope for this backend.
 
 ## Installation
 
@@ -110,8 +101,7 @@ Minimum automated verification:
 - Confirm `/health` succeeds.
 - Synthesize one short sentence to a temporary WAV file.
 - Confirm VideoLingo can read a non-zero audio duration.
-- Verify preset reference mode works without `output/audio/refers/1.wav`.
-- Verify VideoLingo reference mode reports a clear missing-upstream error when prerequisite files are absent.
+- Verify preset voice selection works without `output/audio/refers/1.wav`.
 
 Manual verification:
 
@@ -122,6 +112,8 @@ Out of scope:
 
 - Full video translation.
 - Full-video dubbing generation.
+- Video voice extraction or speaker learning.
+- Custom reference audio.
 - Subjective voice-quality evaluation.
 
 ## Risks

@@ -158,36 +158,16 @@ def page_setting():
             config_input("302ai API", "f5tts.302_api")
 
         elif select_tts == "indextts2":
-            st.info(t("IndexTTS2 runs as a local worker and uses reference audio for voice identity."))
-            reference_modes = {
-                "videolingo": t("Use VideoLingo reference audio"),
-                "preset": t("Use preset voice"),
-                "custom": t("Use custom reference audio"),
-            }
-            selected_reference_mode = st.selectbox(
-                t("Reference Audio Mode"),
-                options=list(reference_modes.keys()),
-                format_func=lambda x: reference_modes[x],
-                index=list(reference_modes.keys()).index(load_key("indextts2.reference_mode")),
+            st.info(t("IndexTTS2 runs as a local worker and uses preset reference voices."))
+            preset_voices = list(load_key("indextts2.preset_voices").keys())
+            selected_preset_voice = st.selectbox(
+                t("Preset Voice"),
+                options=preset_voices,
+                index=preset_voices.index(load_key("indextts2.preset_voice")),
             )
-            if selected_reference_mode != load_key("indextts2.reference_mode"):
-                update_key("indextts2.reference_mode", selected_reference_mode)
+            if selected_preset_voice != load_key("indextts2.preset_voice"):
+                update_key("indextts2.preset_voice", selected_preset_voice)
                 st.rerun()
-
-            if selected_reference_mode == "videolingo":
-                config_input(t("Reference Audio"), "indextts2.reference_audio")
-            elif selected_reference_mode == "preset":
-                preset_voices = list(load_key("indextts2.preset_voices").keys())
-                selected_preset_voice = st.selectbox(
-                    t("Preset Voice"),
-                    options=preset_voices,
-                    index=preset_voices.index(load_key("indextts2.preset_voice")),
-                )
-                if selected_preset_voice != load_key("indextts2.preset_voice"):
-                    update_key("indextts2.preset_voice", selected_preset_voice)
-                    st.rerun()
-            elif selected_reference_mode == "custom":
-                config_input(t("Custom Reference Audio"), "indextts2.custom_reference_audio")
         
 def check_api():
     try:
