@@ -194,3 +194,22 @@ def indextts2_tts(text, save_path, number=None, task_df=None):
         raise RuntimeError(f"IndexTTS2 synthesis failed: {data}")
 
     print(f"Audio saved to {output_path}")
+
+
+def stop_indextts2_worker():
+    global WORKER_PROCESS
+
+    if WORKER_PROCESS is None:
+        return
+    if WORKER_PROCESS.poll() is not None:
+        WORKER_PROCESS = None
+        return
+
+    rprint("[yellow]Stopping IndexTTS2 worker started by this process...[/yellow]")
+    WORKER_PROCESS.terminate()
+    try:
+        WORKER_PROCESS.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        WORKER_PROCESS.kill()
+        WORKER_PROCESS.wait(timeout=5)
+    WORKER_PROCESS = None

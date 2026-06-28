@@ -4,10 +4,11 @@ Runs the full text/subtitle pipeline and saves results to history/.
 
 Usage:
     python translate_video.py <video_path>
-    python translate_video.py /path/to/video.mp4
-    python translate_video.py https://www.youtube.com/watch?v=xxx
+    python translate_video.py --mode no-tts /path/to/video.mp4
+    python translate_video.py --mode tts https://www.youtube.com/watch?v=xxx
 """
 
+import argparse
 import os
 import sys
 import ctypes
@@ -87,6 +88,54 @@ def process_and_align_subtitles():
     align_timestamp_main()
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Translate one video with optional dubbing.")
+    parser.add_argument("video_path_or_url", help="Local video path or YouTube URL")
+    parser.add_argument(
+        "--mode",
+        choices=["no-tts", "tts"],
+        default="no-tts",
+        help="no-tts translates subtitles only; tts translates first, then generates dubbing.",
+    )
+    return parser.parse_args()
+
+
+def run_steps(steps):
+    for step_name, step_func in steps:
+        for attempt in range(3):
+            try:
+                console.print(Panel(
+                    f"[bold green]{step_name}[/]",
+                    subtitle=f"Attempt {attempt + 1}/3" if attempt > 0 else None,
+                    border_style="blue",
+                ))
+                step_func()
+                break
+            except Exception as e:
+                if attempt == 2:
+                    console.print(Panel(
+                        f"[bold red]Failed after 3 attempts: {step_name}[/]\n{e}",
+                        border_style="red",
+                    ))
+                    raise
+                console.print(Panel(
+                    f"[yellow]Attempt {attempt + 1} failed, retrying...[/]",
+                    border_style="yellow",
+                ))
+
+
+def stop_optional_tts_workers():
+    try:
+        from core.tts_backend.indextts2_tts import stop_indextts2_worker
+
+        stop_indextts2_worker()
+    except Exception as e:
+        console.print(Panel(
+            f"[yellow]Warning: failed to stop optional TTS worker[/]\n{e}",
+            border_style="yellow",
+        ))
+
+
 def check_api():
     from core.utils.config_utils import load_key
     from openai import OpenAI
@@ -138,11 +187,8 @@ def check_api():
 
 
 def main():
-    if len(sys.argv) < 2:
-        console.print("[red]Usage: python translate_video.py <video_path_or_url>[/]")
-        sys.exit(1)
-
-    file = sys.argv[1]
+    args = parse_args()
+    file = args.video_path_or_url
 
     console.print(Panel("[bold]Checking API connectivity...[/]", border_style="blue"))
     error, hint = check_api()
@@ -163,33 +209,30 @@ def main():
         ("Merging subtitles to video", _7_sub_into_vid.merge_subtitles_to_video),
     ]
 
-    prepare_output_folder("output")
+    try:
+        prepare_output_folder("output")
+        run_steps(text_steps)
+        if args.mode == "tts":
+            from core import _8_1_audio_task, _8_2_dub_chunks, _9_refer_audio
+            from core import _10_gen_audio, _11_merge_audio, _12_dub_to_vid
 
-    for step_name, step_func in text_steps:
-        for attempt in range(3):
-            try:
-                console.print(Panel(
-                    f"[bold green]{step_name}[/]",
-                    subtitle=f"Attempt {attempt + 1}/3" if attempt > 0 else None,
-                    border_style="blue",
-                ))
-                step_func()
-                break
-            except Exception as e:
-                if attempt == 2:
-                    console.print(Panel(
-                        f"[bold red]Failed after 3 attempts: {step_name}[/]\n{e}",
-                        border_style="red",
-                    ))
-                    sys.exit(1)
-                console.print(Panel(
-                    f"[yellow]Attempt {attempt + 1} failed, retrying...[/]",
-                    border_style="yellow",
-                ))
+            tts_steps = [
+                ("Generating audio tasks", _8_1_audio_task.gen_audio_task_main),
+                ("Generating dubbing chunks", _8_2_dub_chunks.gen_dub_chunks),
+                ("Extracting reference audio", _9_refer_audio.extract_refer_audio_main),
+                ("Generating TTS audio", _10_gen_audio.gen_audio),
+                ("Merging full audio", _11_merge_audio.merge_full_audio),
+                ("Merging dubbing to video", _12_dub_to_vid.merge_video_audio),
+            ]
+            run_steps(tts_steps)
 
-    console.print(Panel("[bold green]All steps completed! Saving to history...[/]", border_style="green"))
-    cleanup("history")
-    console.print("[green]Done. Results saved to history/[/]")
+        console.print(Panel("[bold green]All steps completed! Saving to history...[/]", border_style="green"))
+        cleanup("history")
+        console.print("[green]Done. Results saved to history/[/]")
+    except Exception:
+        sys.exit(1)
+    finally:
+        stop_optional_tts_workers()
 
 
 if __name__ == "__main__":
