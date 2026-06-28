@@ -26,7 +26,7 @@ Add this configuration block:
 indextts2:
   repo_dir: 'external/index-tts'
   host: '127.0.0.1'
-  port: 9871
+  port: 18721
   reference_audio: 'output/audio/refers/1.wav'
   use_fp16: true
   use_cuda_kernel: false
@@ -37,7 +37,7 @@ indextts2:
 
 ## Data Flow
 
-When `tts_method` is `indextts2`, `tts_main()` dispatches to the new adapter. The adapter checks `http://127.0.0.1:9871/health`. If no healthy worker exists, it starts one with `uv run` from `external/index-tts`.
+When `tts_method` is `indextts2`, `tts_main()` dispatches to the new adapter. The adapter checks `http://127.0.0.1:18721/health`. If no healthy worker exists, it starts one with `uv run` from `external/index-tts`.
 
 The worker loads one `IndexTTS2` instance:
 
@@ -78,7 +78,7 @@ Required endpoints:
 - `GET /health`: returns readiness, model-loaded state, and basic configuration.
 - `POST /synthesize`: accepts text, reference audio path, and output path; returns success or structured error details.
 
-The worker should expose a minimal web/HTTP surface so the user can manually verify it after startup at `http://127.0.0.1:9871`.
+The worker should expose a minimal web/HTTP surface so the user can manually verify it after startup at `http://127.0.0.1:18721`.
 
 ## Verification
 
