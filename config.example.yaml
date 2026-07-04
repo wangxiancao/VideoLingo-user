@@ -4,6 +4,7 @@
 # version: "3.0.0"
 # author: "Huanshere"
 # -------------------
+# Copy this file to config.yaml and fill in your own keys.
 
 ## ======================== Basic Settings ======================== ##
 
@@ -11,7 +12,7 @@ display_language: "zh-CN"
 
 # API settings
 api:
-  key: '***REMOVED***'
+  key: 'your-api-key'
   base_url: 'https://api.deepseek.com'
   model: 'deepseek-v4-flash'
   llm_support_json: false
@@ -87,12 +88,12 @@ sf_fish_tts:
 
 # OpenAI TTS-1 API configuration, 302.ai API only
 openai_tts:
-  api_key: '***REMOVED***'
+  api_key: 'your_302_api_key'
   voice: 'echo'
 
 # Azure configuration, 302.ai API only
 azure_tts:
-  api_key: '***REMOVED***'
+  api_key: 'your_302_api_key'
   voice: 'zh-CN-YunfengNeural'
 
 # Azure Direct Speech Service (not through 302.ai proxy)
@@ -103,7 +104,7 @@ azure_direct_tts:
 
 # FishTTS configuration, 302.ai API only
 fish_tts:
-  api_key: '***REMOVED***'
+  api_key: 'your_302_api_key'
   character: '丁真'
   character_id_dict:
     'AD学姐': '7f92f8afb8ec43bf81429cc1c9199cb1'
@@ -150,8 +151,6 @@ speed_factor:
 min_subtitle_duration: 2.5 # Minimum subtitle duration, will be forcibly extended
 min_trim_duration: 3.5 # Subtitles shorter than this value won't be split
 tolerance: 1.5 # Allowed extension time to the next subtitle
-
-
 
 
 

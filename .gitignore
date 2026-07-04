@@ -167,6 +167,7 @@ batch/tasks_setting.xlsx
 .DS_Store
 AllinOne.ipynb
 config.backup.yaml
+config.yaml
 
 # runtime
 runtime/
