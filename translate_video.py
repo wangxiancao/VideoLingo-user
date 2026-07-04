@@ -34,9 +34,13 @@ if os.path.isdir(_conda_lib) and _conda_lib not in os.environ.get("LD_LIBRARY_PA
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
 import shutil
+import subprocess
+import time
 from functools import partial
 from rich.panel import Panel
 from rich.console import Console
+
+import requests
 
 console = Console()
 
@@ -136,6 +140,103 @@ def stop_optional_tts_workers():
         ))
 
 
+# ------------
+# Local Qwen36 bridge lifecycle (auto-start if base_url points to localhost:18722)
+# ------------
+
+QWEN36_BRIDGE_PROCESS = None
+QWEN36_BRIDGE_PORT = 18722
+QWEN36_BRIDGE_SCRIPT = "/root/soft/llama.cpp/qwen36-openai-bridge.py"
+QWEN36_BRIDGE_LD_PATH = (
+    "/usr/local/lib64:"
+    "/root/soft/llama.cpp/build/bin:"
+    "/usr/local/cuda-12.8/lib64"
+)
+
+
+def _qwen36_bridge_health():
+    try:
+        resp = requests.get(f"http://127.0.0.1:{QWEN36_BRIDGE_PORT}/health", timeout=2)
+        return resp.status_code == 200 and resp.json().get("ok") is True
+    except Exception:
+        return False
+
+
+def _start_qwen36_bridge():
+    global QWEN36_BRIDGE_PROCESS
+
+    from core.utils.config_utils import load_key
+
+    base_url = load_key("api.base_url")
+    if str(QWEN36_BRIDGE_PORT) not in base_url:
+        return  # not using local qwen36 bridge
+
+    if _qwen36_bridge_health():
+        console.print("[green]Local Qwen36 bridge already running[/]")
+        return
+
+    if not os.path.isfile(QWEN36_BRIDGE_SCRIPT):
+        console.print(
+            f"[yellow]Qwen36 bridge script not found at {QWEN36_BRIDGE_SCRIPT}, "
+            f"skipping auto-start[/]"
+        )
+        return
+
+    console.print(
+        "[bold blue]Starting local Qwen36 bridge (model loading, ~30-60s)...[/]"
+    )
+
+    env = os.environ.copy()
+    env["LD_LIBRARY_PATH"] = QWEN36_BRIDGE_LD_PATH
+
+    QWEN36_BRIDGE_PROCESS = subprocess.Popen(
+        [
+            sys.executable,
+            QWEN36_BRIDGE_SCRIPT,
+            "--port", str(QWEN36_BRIDGE_PORT),
+            "--auto-start-supervisor",
+            "--ctx-size", "16384",
+            "--supervisor-startup-timeout", "900",
+        ],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    deadline = time.time() + 900
+    while time.time() < deadline:
+        if _qwen36_bridge_health():
+            console.print("[green]Qwen36 bridge ready, model loaded in GPU[/]")
+            return
+        if QWEN36_BRIDGE_PROCESS.poll() is not None:
+            raise RuntimeError(
+                f"Qwen36 bridge exited with code {QWEN36_BRIDGE_PROCESS.returncode} "
+                f"during startup"
+            )
+        time.sleep(2)
+
+    raise TimeoutError("Qwen36 bridge did not become healthy within 900 seconds")
+
+
+def _stop_qwen36_bridge():
+    global QWEN36_BRIDGE_PROCESS
+    if QWEN36_BRIDGE_PROCESS is None:
+        return
+    if QWEN36_BRIDGE_PROCESS.poll() is not None:
+        QWEN36_BRIDGE_PROCESS = None
+        return
+
+    console.print("[yellow]Stopping Qwen36 bridge (unloading model from GPU)...[/]")
+    QWEN36_BRIDGE_PROCESS.terminate()
+    try:
+        QWEN36_BRIDGE_PROCESS.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        QWEN36_BRIDGE_PROCESS.kill()
+        QWEN36_BRIDGE_PROCESS.wait(timeout=5)
+    QWEN36_BRIDGE_PROCESS = None
+    console.print("[green]Qwen36 bridge stopped[/]")
+
+
 def check_api():
     from core.utils.config_utils import load_key
     from openai import OpenAI
@@ -190,6 +291,9 @@ def main():
     args = parse_args()
     file = args.video_path_or_url
 
+    # Start local LLM bridge if configured
+    _start_qwen36_bridge()
+
     console.print(Panel("[bold]Checking API connectivity...[/]", border_style="blue"))
     error, hint = check_api()
     if error:
@@ -233,6 +337,7 @@ def main():
         sys.exit(1)
     finally:
         stop_optional_tts_workers()
+        _stop_qwen36_bridge()
 
 
 if __name__ == "__main__":
