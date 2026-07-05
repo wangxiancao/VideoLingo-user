@@ -130,7 +130,12 @@ f5tts:
 indextts2:
   repo_dir: 'external/index-tts'
   host: '127.0.0.1'
-  port: 18721
+  port: 18721  # base port; used as fallback when `ports` is not set
+  # *Multi-worker pool: list of ports for parallel TTS. If set, client spawns
+  # one worker per port and round-robins requests. Recommended N=3 on a single
+  # 24GB GPU. Override at runtime via `python translate_video.py --tts-workers 3`.
+  # Empty/missing falls back to single-worker on `port` above.
+  ports: [18721, 18722, 18723]
   preset_voice: 'female'
   preset_voices:
     female: 'external/index-tts/examples/voice_09.wav'

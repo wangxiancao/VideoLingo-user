@@ -3,9 +3,47 @@ Single-video translation script.
 Runs the full text/subtitle pipeline and saves results to history/.
 
 Usage:
-    python translate_video.py <video_path>
+    # Subtitles only (default), no dubbing
+    python translate_video.py /path/to/video.mp4
     python translate_video.py --mode no-tts /path/to/video.mp4
+
+    # Subtitles + dubbing (cloud TTS via api.key, e.g. deepseek for translation
+    # and any cloud TTS method set as tts_method in config.yaml)
     python translate_video.py --mode tts https://www.youtube.com/watch?v=xxx
+
+    # Qwen36 (local LLM) + IndexTTS2 dubbing:
+    #   1. set in config.yaml:
+    #        api.base_url: 'http://127.0.0.1:18722/v1'
+    #        tts_method: 'indextts2'
+    #   2. run:
+    python translate_video.py --mode tts /path/to/video.mp4
+    #   The Qwen36 bridge at 127.0.0.1:18722 is auto-started on demand and
+    #   torn down on exit. IndexTTS2 worker follows the same lifecycle.
+
+    Parallel IndexTTS2 (multiple worker processes on different ports):
+      --tts-workers N writes indextts2.ports=[18721, 18722, ..., 18720+N] to
+      config.yaml before the pipeline starts; the client spawns one worker per
+      port and round-robins requests. Parallelism (max_workers in stage 10)
+      auto-tracks the number of ports.
+
+    Recommended N by GPU VRAM (measured, FP16, single GPU):
+      24 GB (3090/4090):   N=3   (N=4 OOMs at model load; ~6.5 GB/worker)
+      16 GB:               N=2
+      12 GB or less:       N=1   (default; same as omitting the flag)
+
+    Measured throughput on RTX 3090, 33 short Chinese subtitle lines:
+      N=1  → 0.199 lines/s  (1.00x baseline)
+      N=2  → 0.295 lines/s  (1.48x)
+      N=3  → 0.360 lines/s  (1.81x)
+
+    Examples:
+    python translate_video.py --mode tts --tts-workers 3 /path/to/video.mp4
+    python translate_video.py --mode tts --tts-workers 2 /path/to/video.mp4
+
+    Notes:
+      - --tts-workers is a no-op unless tts_method=='indextts2' in config.yaml.
+      - Setting N persists in config.yaml; subsequent runs without the flag
+        reuse the same pool. Pass --tts-workers 1 to revert to single-worker.
 """
 
 import argparse
@@ -101,7 +139,61 @@ def parse_args():
         default="no-tts",
         help="no-tts translates subtitles only; tts translates first, then generates dubbing.",
     )
+    parser.add_argument(
+        "--tts-workers",
+        type=int,
+        default=None,
+        help=(
+            "Number of IndexTTS2 worker processes to spawn (only used with --mode tts and "
+            "tts_method=indextts2). Writes indextts2.ports=[18721, 18722, ...] to config.yaml "
+            "before the pipeline starts. Recommended 3 for a single 24GB GPU."
+        ),
+    )
     return parser.parse_args()
+
+
+def apply_tts_workers_override(n):
+    """Translate --tts-workers N into indextts2.ports = [base, base+1, ..., base+N-1].
+
+    Writes to config.yaml so every downstream module reads the same pool.
+    No-op when n is None or tts_method isn't indextts2.
+
+    Writes the YAML directly via ruamel rather than update_key, because
+    update_key refuses to add a key that doesn't yet exist — and existing
+    config.yaml files only have the singular `port:` field.
+    """
+    if n is None:
+        return
+    from core.utils.config_utils import load_key, CONFIG_PATH, lock, yaml
+
+    if load_key("tts_method") != "indextts2":
+        console.print(
+            "[yellow]--tts-workers ignored (tts_method is not 'indextts2')[/]"
+        )
+        return
+
+    if n < 1:
+        raise ValueError(f"--tts-workers must be >= 1, got {n}")
+
+    base_port = int(load_key("indextts2.port"))
+    ports = [base_port + i for i in range(n)]
+
+    # ponytail: direct YAML edit. update_key can't add a missing key, and we
+    # don't want to require users to manually migrate config.yaml.
+    with lock:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = yaml.load(f)
+        data["indextts2"]["ports"] = ports
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            yaml.dump(data, f)
+
+    console.print(Panel(
+        f"[bold green]Configured IndexTTS2 worker pool[/]\n"
+        f"  ports: {ports}\n"
+        f"  max_workers: {n}\n"
+        f"  (single 24GB GPU maxes out at ~3 workers before OOM)",
+        border_style="green",
+    ))
 
 
 def run_steps(steps):
@@ -290,6 +382,9 @@ def check_api():
 def main():
     args = parse_args()
     file = args.video_path_or_url
+
+    # Override indextts2.ports before anything reads the config.
+    apply_tts_workers_override(args.tts_workers)
 
     # Start local LLM bridge if configured
     _start_qwen36_bridge()
