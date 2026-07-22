@@ -176,3 +176,8 @@ installer_files/
 # Claude Code
 CLAUDE.md
 AGENTS.md
+
+# OpenCode session data
+.omo/
+queue_state.json
+queue_logs/
