@@ -1,6 +1,5 @@
 import os
 import json
-import re
 from threading import Lock
 import json_repair
 import httpx
@@ -16,39 +15,6 @@ from core.utils.decorator import except_handler
 LOCK = Lock()
 GPT_LOG_FOLDER = 'output/gpt_log'
 
-
-def _is_local_qwen36(base_url, model):
-    base_url = str(base_url or "").lower()
-    model = str(model or "").lower()
-    return (
-        "127.0.0.1:18722" in base_url
-        or "localhost:18722" in base_url
-        or "qwen3.6" in model
-    )
-
-
-def _prepare_prompt_for_model(prompt, base_url, model):
-    """Keep local Qwen3.x in fast non-thinking mode for pipeline calls."""
-    if not _is_local_qwen36(base_url, model):
-        return prompt
-    stripped = prompt.lstrip()
-    if stripped.startswith(("/no_think", "/think")):
-        return prompt
-    return (
-        "/no_think\n"
-        "Return only the requested final answer. Do not output hidden reasoning, "
-        "analysis outside the requested JSON, or extra prose.\n\n"
-        f"{prompt}"
-    )
-
-
-def _strip_thinking_blocks(text):
-    if not isinstance(text, str):
-        return text
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
-    if "</think>" in text:
-        text = text.rsplit("</think>", 1)[-1]
-    return text.strip()
 
 def _save_cache(model, prompt, resp_content, resp_type, resp, message=None, log_title="default"):
     with LOCK:
@@ -92,14 +58,13 @@ def ask_gpt(prompt, resp_type=None, valid_def=None, log_title="default"):
         base_url = "https://ark.cn-beijing.volces.com/api/v3" # huoshan base url
     elif 'v1' not in base_url:
         base_url = base_url.strip('/') + '/v1'
-    request_prompt = _prepare_prompt_for_model(prompt, base_url, model)
 
     # Bypass SOCKS proxy (httpx doesn't support socks:// without socksio)
     http_client = httpx.Client(proxy=None, transport=httpx.HTTPTransport())
     client = OpenAI(api_key=load_key("api.key"), base_url=base_url, http_client=http_client)
     response_format = {"type": "json_object"} if resp_type == "json" and load_key("api.llm_support_json") else None
 
-    messages = [{"role": "user", "content": request_prompt}]
+    messages = [{"role": "user", "content": prompt}]
 
     params = dict(
         model=model,
@@ -112,7 +77,7 @@ def ask_gpt(prompt, resp_type=None, valid_def=None, log_title="default"):
     # process and return full result
     resp_content = resp_raw.choices[0].message.content
     if resp_type == "json":
-        resp = json_repair.loads(_strip_thinking_blocks(resp_content))
+        resp = json_repair.loads(resp_content)
     else:
         resp = resp_content
     

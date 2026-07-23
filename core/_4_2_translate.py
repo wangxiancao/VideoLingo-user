@@ -12,25 +12,6 @@ from difflib import SequenceMatcher
 from core.utils.models import *
 console = Console()
 
-
-def _use_local_qwen36():
-    try:
-        base_url = str(load_key("api.base_url")).lower()
-        model = str(load_key("api.model")).lower()
-    except KeyError:
-        return False
-    return (
-        "127.0.0.1:18722" in base_url
-        or "localhost:18722" in base_url
-        or "qwen3.6" in model
-    )
-
-
-def _translation_chunk_config():
-    if _use_local_qwen36():
-        return 480, 8
-    return 600, 10
-
 # Function to split text into chunks
 def split_chunks_by_chars(chunk_size, max_i): 
     """Split text into chunks based on character count, return a list of multi-line text chunks"""
@@ -73,13 +54,7 @@ def similar(a, b):
 @check_file_exists(_4_2_TRANSLATION)
 def translate_all():
     console.print("[bold green]Start Translating All...[/bold green]")
-    chunk_size, max_i = _translation_chunk_config()
-    chunks = split_chunks_by_chars(chunk_size=chunk_size, max_i=max_i)
-    if _use_local_qwen36():
-        console.print(
-            f"[cyan]Local Qwen36 detected: using smaller translation chunks "
-            f"(chunk_size={chunk_size}, max_lines={max_i}).[/cyan]"
-        )
+    chunks = split_chunks_by_chars(chunk_size=600, max_i=10)
     with open(_4_1_TERMINOLOGY, 'r', encoding='utf-8') as file:
         theme_prompt = json.load(file).get('theme')
 

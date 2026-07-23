@@ -193,8 +193,8 @@ def get_prompt_expressiveness(faithfulness_result, lines, shared_prompt):
         key: {
             "origin": value["origin"],
             "direct": value["direct"],
-            "reflect": "short issue tag, max 12 words",
-            "free": "natural subtitle translation"
+            "reflect": "your reflection on direct translation",
+            "free": "your free translation"
         }
         for key, value in faithfulness_result.items()
     }
@@ -210,36 +210,27 @@ Your expertise lies not only in accurately understanding the original {src_langu
 We already have a direct translation version of the original {src_language} subtitles.
 Your task is to reflect on and improve these direct translations to create more natural and fluent {TARGET_LANGUAGE} subtitles.
 
-1. Briefly reflect on the direct translation line by line
-2. Rewrite each line as a natural {TARGET_LANGUAGE} subtitle
-3. Do not add comments or explanations in the translation, as the subtitles are for the audience to read
-4. Do not leave empty lines in the free translation, as the subtitles are for the audience to read
+1. Analyze the direct translation results line by line, pointing out existing issues
+2. Provide detailed modification suggestions
+3. Perform free translation based on your analysis
+4. Do not add comments or explanations in the translation, as the subtitles are for the audience to read
+5. Do not leave empty lines in the free translation, as the subtitles are for the audience to read
 
 {shared_prompt}
 
-<Translation Editing Steps>
-Please use this two-step editing checklist line by line:
+<Translation Analysis Steps>
+Please use a two-step thinking process to handle the text line by line:
 
-1. Direct Translation Reflection (`reflect`):
+1. Direct Translation Reflection:
    - Evaluate language fluency
    - Check if the language style is consistent with the original text
-   - Check subtitle conciseness
-   - Write only one short issue tag, max 12 words or 20 CJK characters
-   - Do not include detailed analysis, quotes, bullets, or newlines
+   - Check the conciseness of the subtitles, point out where the translation is too wordy
 
-2. {TARGET_LANGUAGE} Free Translation (`free`):
+2. {TARGET_LANGUAGE} Free Translation:
    - Aim for contextual smoothness and naturalness, conforming to {TARGET_LANGUAGE} expression habits
    - Ensure it's easy for {TARGET_LANGUAGE} audience to understand and accept
    - Adapt the language style to match the theme (e.g., use casual language for tutorials, professional terminology for technical content, formal language for documentaries)
-   - Keep each `free` value to one subtitle line
-</Translation Editing Steps>
-
-<Output Rules>
-- Output exactly the same top-level keys as the JSON template.
-- Every item must include `origin`, `direct`, `reflect`, and `free`.
-- Keep every JSON string on one line.
-- Do not output hidden reasoning or analysis outside the JSON.
-</Output Rules>
+</Translation Analysis Steps>
    
 ## INPUT
 <subtitles>
