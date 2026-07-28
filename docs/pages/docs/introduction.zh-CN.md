@@ -9,7 +9,7 @@ VideoLingo 是一站式视频翻译本地化配音工具，能够一键生成 Ne
 主要特点和功能：
 - 🎥 使用 yt-dlp 从 Youtube 链接下载视频
 
-- **🎙️ 使用 WhisperX 进行单词级时间轴字幕识别**
+- **🎙️ 使用 Qwen3-ASR 进行单词级时间轴字幕识别**
 
 - **📝 使用 NLP 和 GPT 根据句意进行字幕分割**
 
@@ -19,34 +19,13 @@ VideoLingo 是一站式视频翻译本地化配音工具，能够一键生成 Ne
 
 - **✅ 按照 Netflix 标准检查单行长度，绝无双行字幕**
 
-- **🗣️ 使用 GPT-SoVITS 等方法对齐克隆配音**
+- **🗣️ 使用 IndexTTS2 和 custom TTS 对齐克隆配音**
 
 - 🚀 整合包一键启动，在 streamlit 中一键出片
 
 - 📝 详细记录每步操作日志，支持随时中断和恢复进度
 
 与同类项目相比的优势：**绝无多行字幕，最佳的翻译质量，无缝的配音体验**
-
-## 🎥 效果演示
-
-<table>
-<tr>
-<td width="50%">
-
-### 俄语翻译
----
-https://github.com/user-attachments/assets/25264b5b-6931-4d39-948c-5a1e4ce42fa7
-
-</td>
-<td width="50%">
-
-### GPT-SoVITS配音
----
-https://github.com/user-attachments/assets/47d965b2-b4ab-4a0b-9d08-b49a7bf3508c
-
-</td>
-</tr>
-</table>
 
 ### 语言支持
 
@@ -102,26 +81,26 @@ docker run -d -p 8501:8501 --gpus all videolingo
 ## API
 本项目支持 OpenAI-Like 格式的 api 和多种配音接口：
 - `claude-3-5-sonnet-20240620`, `gpt-4.1`, `deepseek-v3`, ...（按效果排序）
-- `azure-tts`, `openai-tts`, `siliconflow-fishtts`, `fish-tts`, `GPT-SoVITS`
+- `custom_tts`, `indextts2`
 
 详细的安装、 API 配置、汉化、批量说明可以参见文档：[English](/docs/pages/docs/start.en-US.md) | [简体中文](/docs/pages/docs/start.zh-CN.md)
 
 ## 当前限制
-1. WhisperX 转录效果可能受到视频背景声影响，因为使用了 wav2vac 模型进行对齐。对于背景音乐较大的视频，请开启人声分离增强。另外，如果字幕以数字或特殊符号结尾，可能会导致提前截断，这是因为 wav2vac 无法将数字字符（如"1"）映射到其发音形式（"one"）。
+1. ASR 转录质量取决于音频清晰度。Qwen3-ASR 对背景噪声有较强的鲁棒性，但对于背景音乐较大的视频，仍建议开启人声分离增强（Demucs）以获得最佳对齐效果。Qwen3-ASR 的 ForcedAligner 提供 ~37ms 的时间戳精度，显著优于基于 wav2vac 的对齐方式，且不存在数字/符号截断问题。
 
 2. 使用较弱模型时容易在中间过程报错，这是因为对响应的 json 格式要求较为严格。如果出现此错误，请删除 `output` 文件夹后更换 llm 重试，否则重复执行会读取上次错误的响应导致同样错误。
 
 3. 配音功能由于不同语言的语速和语调差异，还受到翻译步骤的影响，可能不能 100% 完美，但本项目做了非常多的语速上的工程处理，尽可能保证配音效果。
 
-4. **多语言视频转录识别仅仅只会保留主要语言**，这是由于 whisperX 在强制对齐单词级字幕时使用的是针对单个语言的特化模型，会因为不认识另一种语言而删去。
+4. **语码切换支持**：Qwen3-ASR 原生支持混合语言音频（如中英混合），但下游的翻译和 TTS 阶段目前仅处理单一主要语言，完整的多语言流水线支持仍在开发中。
 
-5. **无法多角色分别配音**，whisperX 的说话人区分效果不够好用。
+5. **说话人分离**：本流水线目前不支持对多位说话人进行分别配音。Qwen3-ASR 不具备原生的说话人分离能力，需要借助外部系统（如 pyannote）才能实现。
 
 ## 📄 许可证
 
 本项目采用 Apache 2.0 许可证，衷心感谢以下开源项目的贡献：
 
-[whisperX](https://github.com/m-bain/whisperX), [yt-dlp](https://github.com/yt-dlp/yt-dlp), [json_repair](https://github.com/mangiucugna/json_repair), [BELLE](https://github.com/LianjiaTech/BELLE)
+[Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR), [yt-dlp](https://github.com/yt-dlp/yt-dlp), [json_repair](https://github.com/mangiucugna/json_repair), [BELLE](https://github.com/LianjiaTech/BELLE)
 
 ## 📬 联系我们
 

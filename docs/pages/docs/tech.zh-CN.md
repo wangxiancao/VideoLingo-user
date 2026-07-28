@@ -21,10 +21,7 @@ Videolingo 是一个高度集成的视频翻译系统，能够自动执行一系
 
 *   `core/asr_backend/demucs_vl.py`: 使用 Demucs 模型 (`htdemucs`) 将音频分离为人声和背景音轨，从而提高后续 ASR 的质量。
 *   `core/asr_backend/audio_preprocess.py`: 包含准备音频的基本功能：音量标准化 (`pydub`)、视频到音频的转换 (`ffmpeg`)、静音检测 (`ffmpeg`)、音频时长计算 (`ffmpeg`)、将长音频文件拆分为可管理的片段、将 ASR 结果处理为 DataFrames、保存结果以及存储检测到的语言。
-*   `core/asr_backend/whisperX_local.py`: 使用 WhisperX 库实现本地音频转录。根据可用硬件（GPU/CPU）优化性能，处理模型下载（具有镜像检查），执行转录和对齐，调整时间戳，并管理 GPU 内存。
-*   `core/asr_backend/whisperX_302.py`: 使用 302.ai WhisperX API 实现音频转录，包括缓存和时间戳调整。
-*   `core/asr_backend/elevenlabs_asr.py`: 使用 ElevenLabs 语音转文本 API 实现音频转录，处理音频切片、API 交互、格式转换（ElevenLabs 到类似 Whisper 的格式）和临时文件管理。
-*   `core/_2_asr.py`: 编排 ASR 过程。提取音频，可选择执行 Demucs 人声分离，拆分音频，调用配置的 ASR 后端（本地 WhisperX、302 API 或 Elevenlabs API），合并结果，将转录处理为 DataFrame，并保存输出。
+*   `core/_2_asr.py`: 编排 ASR 过程。提取音频，可选择执行 Demucs 人声分离，拆分音频，调用配置的 ASR 后端，合并结果，将转录处理为 DataFrame，并保存输出。
 
 **4. 文本处理和翻译模块 (`core`, `core/spacy_utils`):**
 
@@ -51,17 +48,9 @@ Videolingo 是一个高度集成的视频翻译系统，能够自动执行一系
 
 *   `core/_8_1_audio_task.py`: 解析 SRT 文件，合并短字幕，清理文本，使用 LLM 根据估计的时长修剪文本，并生成一个 Excel 文件 (`_8_1_AUDIO_TASK.xlsx`)，用于定义 TTS 引擎的任务。利用 `core/prompts.py` 中定义的提示。
 *   `core/_8_2_dub_chunks.py`: 分析音频任务文件，计算时间间隙和语速，根据速度和停顿确定配音块的最佳切断点，必要时合并行，匹配字幕，并更新任务文件。
-*   `core/_9_refer_audio.py`: 基于音频任务文件中定义的时间戳，从源人声音轨中提取特定的音频片段，创建某些 TTS 引擎（如 GPT-SoVITS、F5-TTS、FishTTS）使用的参考音频文件。
+*   `core/_9_refer_audio.py`: 基于音频任务文件中定义的时间戳，从源人声音轨中提取特定的音频片段，创建某些 TTS 引擎（如 IndexTTS2）使用的参考音频文件。
 *   **TTS 后端 (`core/tts_backend`):**
-    *   `core/tts_backend/azure_tts.py`: Azure 文本转语音 API 的接口。
     *   `core/tts_backend/custom_tts.py`: 用于集成自定义 TTS 引擎的占位符/模板。
-    *   `core/tts_backend/edge_tts.py`: 使用 `edge-tts` 命令行工具的 Microsoft Edge TTS 的接口。
-    *   `core/tts_backend/fish_tts.py`: 302.ai Fish TTS API 的接口。
-    *   `core/tts_backend/gpt_sovits_tts.py`: 本地 GPT-SoVITS 服务器的接口，包括服务器启动逻辑。
-    *   `core/tts_backend/openai_tts.py`: OpenAI 文本转语音 API 的接口。
-    *   `core/tts_backend/sf_cosyvoice2.py`: SiliconFlow CosyVoice2 TTS API 的接口，支持参考音频。
-    *   `core/tts_backend/sf_fishtts.py`: SiliconFlow Fish TTS API 的接口，支持具有参考音频的预设、自定义和动态语音模式。
-    *   `core/tts_backend/_302_f5tts.py`: 302.ai F5-TTS API 的接口，使用参考音频进行语音克隆。
     *   `core/tts_backend/estimate_duration.py`: 提供根据特定语言的音节计数和标点符号停顿来估计文本的说话时长的函数。用于音频任务生成和字幕修剪。
     *   `core/tts_backend/tts_main.py`: 中央 TTS 调度器。清理输入文本，根据配置 (`load_key("tts_method")`) 选择适当的 TTS 后端，调用相应的 TTS 函数，使用重试和基于 GPT 的文本纠正来处理错误，验证音频时长，并保存输出 WAV 文件。
 *   `core/_10_gen_audio.py`: 使用选定的 TTS 后端通过 `tts_main.py` 生成单独的音频片段。基于计算的因子调整生成的音频速度 (`ffmpeg`) 以适应任务文件中指定的目标时长，并将片段合并为块。使用 `ThreadPoolExecutor` 处理并行处理。

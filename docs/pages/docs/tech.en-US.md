@@ -21,10 +21,7 @@ The following outlines the core technical modules and workflows:
 
 *   `core/asr_backend/demucs_vl.py`: Employs the Demucs model (`htdemucs`) to separate audio into vocal and background tracks, improving the quality of subsequent ASR.
 *   `core/asr_backend/audio_preprocess.py`: Contains fundamental functions for preparing audio: volume normalization (`pydub`), video-to-audio conversion (`ffmpeg`), silence detection (`ffmpeg`), audio duration calculation (`ffmpeg`), splitting long audio files into manageable segments, processing ASR results into DataFrames, saving results, and storing detected languages.
-*   `core/asr_backend/whisperX_local.py`: Implements local audio transcription using the WhisperX library. Optimizes performance based on available hardware (GPU/CPU), handles model downloads (with mirror checking), performs transcription and alignment, adjusts timestamps, and manages GPU memory.
-*   `core/asr_backend/whisperX_302.py`: Implements audio transcription using the 302.ai WhisperX API, including caching and timestamp adjustment.
-*   `core/asr_backend/elevenlabs_asr.py`: Implements audio transcription using the ElevenLabs Speech to Text API, handling audio slicing, API interaction, format conversion (ElevenLabs to Whisper-like format), and temporary file management.
-*   `core/_2_asr.py`: Orchestrates the ASR process. Extracts audio, optionally performs Demucs vocal separation, splits audio, invokes the configured ASR backend (local WhisperX, 302 API, or Elevenlabs API), merges results, processes transcriptions into a DataFrame, and saves the output.
+*   `core/_2_asr.py`: Orchestrates the ASR process. Extracts audio, optionally performs Demucs vocal separation, splits audio, invokes the configured ASR backend, merges results, processes transcriptions into a DataFrame, and saves the output.
 
 **4. Text Processing and Translation Module (`core`, `core/spacy_utils`):**
 
@@ -51,17 +48,9 @@ The following outlines the core technical modules and workflows:
 
 *   `core/_8_1_audio_task.py`: Parses the SRT file, merges short subtitles, cleans the text, trims text based on estimated duration using an LLM, and generates an Excel file (`_8_1_AUDIO_TASK.xlsx`) defining the tasks for the TTS engine. Leverages prompts defined in `core/prompts.py`.
 *   `core/_8_2_dub_chunks.py`: Analyzes the audio task file, calculates time gaps and speaking rates, determines optimal cut points for dubbing chunks based on speed and pauses, merges lines where necessary, matches subtitles, and updates the task file.
-*   `core/_9_refer_audio.py`: Extracts specific audio segments from the source vocal track based on timestamps defined in the audio task file, creating reference audio files used by certain TTS engines (e.g., GPT-SoVITS, F5-TTS, FishTTS).
+*   `core/_9_refer_audio.py`: Extracts specific audio segments from the source vocal track based on timestamps defined in the audio task file, creating reference audio files used by certain TTS engines (e.g., IndexTTS2).
 *   **TTS Backends (`core/tts_backend`):**
-    *   `core/tts_backend/azure_tts.py`: Interface to the Azure Text-to-Speech API.
     *   `core/tts_backend/custom_tts.py`: Placeholder/template for integrating custom TTS engines.
-    *   `core/tts_backend/edge_tts.py`: Interface to Microsoft Edge TTS using the `edge-tts` command-line tool.
-    *   `core/tts_backend/fish_tts.py`: Interface to the 302.ai Fish TTS API.
-    *   `core/tts_backend/gpt_sovits_tts.py`: Interface to a local GPT-SoVITS server, including server startup logic.
-    *   `core/tts_backend/openai_tts.py`: Interface to the OpenAI Text-to-Speech API.
-    *   `core/tts_backend/sf_cosyvoice2.py`: Interface to the SiliconFlow CosyVoice2 TTS API, supporting reference audio.
-    *   `core/tts_backend/sf_fishtts.py`: Interface to the SiliconFlow Fish TTS API, supporting preset, custom, and dynamic voice modes with reference audio.
-    *   `core/tts_backend/_302_f5tts.py`: Interface to the 302.ai F5-TTS API, which uses reference audio for voice cloning.
     *   `core/tts_backend/estimate_duration.py`: Provides functions to estimate the speaking duration of text based on syllable counts and punctuation pauses for a given language. Used for audio task generation and subtitle trimming.
     *   `core/tts_backend/tts_main.py`: Central TTS dispatcher. Cleans input text, selects the appropriate TTS backend based on configuration (`load_key("tts_method")`), calls the corresponding TTS function, handles errors using retries and GPT-based text correction, validates audio duration, and saves the output WAV file.
 *   `core/_10_gen_audio.py`: Generates individual audio segments using the selected TTS backend via `tts_main.py`. Adjusts the speed of the generated audio using a computed factor (`ffmpeg`) to match target durations specified in the task file, and concatenates segments into chunks. Uses `ThreadPoolExecutor` for parallel processing.
