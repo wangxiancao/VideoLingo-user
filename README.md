@@ -68,18 +68,14 @@ https://github.com/user-attachments/assets/e065fe4c-3694-477f-b4d6-316917df7c0a
 
 ## Installation
 
-Meet any problem? Chat with our free online AI agent [**here**](https://share.fastgpt.in/chat/share?shareId=066w11n3r9aq6879r4z0v9rh) to help you.
+> **Prerequisites:** Python 3.10+, NVIDIA GPU with ≥8GB VRAM (16GB+ recommended), FFmpeg
 
-> **Note:** For Windows users with NVIDIA GPU, follow these steps before installation:
-> 1. Install [CUDA Toolkit 12.6](https://developer.download.nvidia.com/compute/cuda/12.6.0/local_installers/cuda_12.6.0_560.76_windows.exe)
-> 2. Install [CUDNN 9.3.0](https://developer.download.nvidia.com/compute/cudnn/9.3.0/local_installers/cudnn_9.3.0_windows.exe)
-> 3. Add `C:\Program Files\NVIDIA\CUDNN\v9.3\bin\12.6` to your system PATH
-> 4. Restart your computer
+> **Note:** For Windows users with NVIDIA GPU, install [CUDA Toolkit 12.6+](https://developer.nvidia.com/cuda-toolkit) and [cuDNN 9.x](https://developer.nvidia.com/cudnn), then add the cuDNN bin directory to your system PATH.
 
-> **Note:** FFmpeg is required. Please install it via package managers:
-> - Windows: ```choco install ffmpeg``` (via [Chocolatey](https://chocolatey.org/))
-> - macOS: ```brew install ffmpeg``` (via [Homebrew](https://brew.sh/))
-> - Linux: ```sudo apt install ffmpeg``` (Debian/Ubuntu)
+> **Note:** FFmpeg is required. Install via:
+> - Windows: `choco install ffmpeg` (via [Chocolatey](https://chocolatey.org/))
+> - macOS: `brew install ffmpeg` (via [Homebrew](https://brew.sh/))
+> - Linux: `sudo apt install ffmpeg` (Debian/Ubuntu)
 
 1. Clone the repository
 
@@ -88,27 +84,35 @@ git clone https://github.com/Huanshere/VideoLingo.git
 cd VideoLingo
 ```
 
-2. Install dependencies(requires `python=3.10`)
+2. Create and activate a Python 3.10 environment
 
+**Option A: uv (recommended, faster)**
 ```bash
-conda create -n videolingo python=3.10.0 -y
-conda activate videolingo
-python install.py
+uv venv .venv --python 3.10
+source .venv/bin/activate    # Linux/macOS
+# .venv\Scripts\activate     # Windows
 ```
 
-3. Start the application
+**Option B: conda**
+```bash
+conda create -n videolingo python=3.10 -y
+conda activate videolingo
+```
+
+3. Install dependencies
+
+```bash
+pip install -r requirements.txt
+python -m spacy download en_core_web_md
+```
+
+4. Start the application
 
 ```bash
 streamlit run st.py
 ```
 
-### Docker
-Alternatively, you can use Docker (requires CUDA 12.4+ and NVIDIA Driver version >550), see [Docker docs](/docs/pages/docs/docker.en-US.md):
-
-```bash
-docker build -t videolingo .
-docker run -d -p 8501:8501 --gpus all videolingo
-```
+5. Configure API and models in `config.yaml` (see [documentation](/docs/pages/docs/start.en-US.md))
 
 ## Architecture
 
