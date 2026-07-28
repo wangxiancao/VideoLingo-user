@@ -4,7 +4,6 @@ from typing import Dict, List, Tuple
 from pydub import AudioSegment
 from core.utils import *
 from core.utils.models import *
-from pydub import AudioSegment
 from pydub.silence import detect_silence
 from pydub.utils import mediainfo
 from rich import print as rprint
@@ -133,7 +132,9 @@ def process_transcription(result: Dict) -> pd.DataFrame:
                 
                 all_words.append(word_dict)
     
-    return pd.DataFrame(all_words)
+    df = pd.DataFrame(all_words)
+    df.insert(0, 'word_id', range(len(df)))
+    return df
 
 def save_results(df: pd.DataFrame):
     os.makedirs('output/log', exist_ok=True)
@@ -155,5 +156,41 @@ def save_results(df: pd.DataFrame):
     df.to_excel(_2_CLEANED_CHUNKS, index=False)
     rprint(f"[green]📊 Excel file saved to {_2_CLEANED_CHUNKS}[/green]")
 
-def save_language(language: str):
-    update_key("whisper.detected_language", language)
+def build_and_save_sentences(df):
+    """Group words into sentences by sentence-ending punctuation, save to _2_SENTENCES."""
+    import re
+    sentences = []
+    sent_start_idx = 0
+    sent_end_puncts = re.compile(r'[.!?。！？…]')
+
+    for idx, row in df.iterrows():
+        text = str(row['text']).strip().strip('"').strip()
+        if sent_end_puncts.search(text):
+            subset = df.iloc[sent_start_idx:idx+1]
+            sentences.append({
+                'sentence_id': len(sentences),
+                'text': ' '.join(subset['text'].str.strip('"').str.strip().tolist()),
+                'start_word_id': int(subset.iloc[0]['word_id']),
+                'end_word_id': int(subset.iloc[-1]['word_id']),
+                'start': float(subset.iloc[0]['start']),
+                'end': float(subset.iloc[-1]['end']),
+            })
+            sent_start_idx = idx + 1
+
+    # Handle remaining words after last punctuation
+    if sent_start_idx < len(df):
+        subset = df.iloc[sent_start_idx:]
+        sentences.append({
+            'sentence_id': len(sentences),
+            'text': ' '.join(subset['text'].str.strip('"').str.strip().tolist()),
+            'start_word_id': int(subset.iloc[0]['word_id']),
+            'end_word_id': int(subset.iloc[-1]['word_id']),
+            'start': float(subset.iloc[0]['start']),
+            'end': float(subset.iloc[-1]['end']),
+        })
+
+    import os
+    os.makedirs('output/log', exist_ok=True)
+    pd.DataFrame(sentences).to_excel(_2_SENTENCES, index=False)
+    rprint(f"[green]📝 Sentences saved to {_2_SENTENCES}[/green]")
+
