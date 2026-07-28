@@ -92,11 +92,8 @@ def generate_tts_audio(tasks_df: pd.DataFrame) -> pd.DataFrame:
                 rprint(f"[red]❌ Error in warmup: {str(e)}[/red]")
                 raise e
         
-        # for gpt_sovits, do not use parallel to avoid mistakes
         tts_method = load_key("tts_method")
-        if tts_method == "gpt_sovits":
-            max_workers = 1
-        elif tts_method == "indextts2":
+        if tts_method == "indextts2":
             # ponytail: parallelism = number of worker ports (see indextts2_tts.worker_count)
             from core.tts_backend.indextts2_tts import worker_count
             max_workers = worker_count()

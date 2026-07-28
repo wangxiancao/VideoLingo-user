@@ -7,13 +7,8 @@ Usage:
     python translate_video.py /path/to/video.mp4
     python translate_video.py --mode no-tts /path/to/video.mp4
 
-    # Subtitles + dubbing (cloud TTS via api.key, e.g. deepseek for translation
-    # and any cloud TTS method set as tts_method in config.yaml)
+    # Subtitles + dubbing (TTS method set as tts_method in config.yaml)
     python translate_video.py --mode tts https://www.youtube.com/watch?v=xxx
-
-    # Subtitles + dubbing with EdgeTTS (online, no GPU, preset voice)
-    python translate_video.py --mode tts --voice male /path/to/video.mp4
-    python translate_video.py --mode tts --voice female /path/to/video.mp4
 
     Parallel IndexTTS2 (multiple worker processes on different ports):
       --tts-workers N writes an IndexTTS2 port pool to config.yaml before the
@@ -31,24 +26,12 @@ Usage:
       N=2  → 0.295 lines/s  (1.48x)
       N=3  → 0.360 lines/s  (1.81x)
 
-    EdgeTTS voice selection (tts_method=='edge_tts'):
-      --voice selects the EdgeTTS voice for this run. Accepts 'male' /
-      'female' shorthand (male=zh-CN-YunyangNeural, female=zh-CN-XiaoxiaoNeural)
-      or any full edge-tts voice name (e.g. zh-CN-YunxiNeural). Writes
-      edge_tts.voice to config.yaml before the pipeline starts; omit the flag
-      to use the value already in config.yaml. No GPU and no worker pool —
-      online only, fixed preset voice (no speaker cloning).
-
     Examples:
     python translate_video.py --mode tts --tts-workers 3 /path/to/video.mp4
     python translate_video.py --mode tts --tts-workers 2 /path/to/video.mp4
-    python translate_video.py --mode tts --voice male /path/to/video.mp4
-    python translate_video.py --mode tts --voice female /path/to/video.mp4
 
     Notes:
       - --tts-workers is a no-op unless tts_method=='indextts2' in config.yaml.
-      - --voice is a no-op unless tts_method=='edge_tts' in config.yaml; it
-        persists edge_tts.voice in config.yaml for subsequent runs.
       - Setting N persists in config.yaml; subsequent runs without the flag
         reuse the same pool. Pass --tts-workers 1 to revert to single-worker.
 """
@@ -154,15 +137,6 @@ def parse_args():
             "before the pipeline starts. Recommended 3 for a single 24GB GPU."
         ),
     )
-    parser.add_argument(
-        "--voice",
-        default=None,
-        help=(
-            "EdgeTTS voice override (only used with tts_method=edge_tts). "
-            "Accepts 'male' / 'female' shorthand or a full voice name "
-            "(e.g. zh-CN-YunyangNeural). Writes edge_tts.voice to config.yaml."
-        ),
-    )
     return parser.parse_args()
 
 
@@ -207,45 +181,6 @@ def apply_tts_workers_override(n):
         f"  ports: {ports}\n"
         f"  max_workers: {n}\n"
         f"  (single 24GB GPU maxes out at ~3 workers before OOM)",
-        border_style="green",
-    ))
-
-
-# ponytail: 2-entry shorthand map. Pass a full voice name for anything else,
-# or move to a config map if more presets are needed later.
-EDGE_VOICE_ALIASES = {
-    "male": "zh-CN-YunyangNeural",
-    "female": "zh-CN-XiaoxiaoNeural",
-}
-
-
-def apply_edge_voice_override(voice):
-    """Translate --voice into an edge_tts.voice config write.
-
-    Accepts 'male'/'female' shorthand or any full edge-tts voice name.
-    No-op when voice is None or tts_method isn't edge_tts.
-    """
-    from core.utils.config_utils import load_key, CONFIG_PATH, lock, yaml
-
-    if voice is None:
-        return
-    if load_key("tts_method") != "edge_tts":
-        console.print(
-            "[yellow]--voice ignored (tts_method is not 'edge_tts')[/]"
-        )
-        return
-
-    resolved = EDGE_VOICE_ALIASES.get(voice.lower(), voice)
-    with lock:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            data = yaml.load(f)
-        data["edge_tts"]["voice"] = resolved
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            yaml.dump(data, f)
-
-    console.print(Panel(
-        f"[bold green]EdgeTTS voice override[/]\n"
-        f"  --voice {voice} -> {resolved}",
         border_style="green",
     ))
 
@@ -341,9 +276,8 @@ def main():
     file = args.video_path_or_url
 
     try:
-        # Override indextts2.ports and edge_tts.voice before anything reads the config.
+        # Override indextts2.ports before anything reads the config.
         apply_tts_workers_override(args.tts_workers)
-        apply_edge_voice_override(args.voice)
 
         console.print(Panel("[bold]Checking API connectivity...[/]", border_style="blue"))
         error, hint = check_api()
@@ -356,7 +290,7 @@ def main():
 
         text_steps = [
             ("Processing input file", partial(process_input_file, file)),
-            ("Transcribing with Whisper", _2_asr.transcribe),
+            ("Transcribing with Qwen3-ASR", _2_asr.transcribe),
             ("Splitting sentences", split_sentences),
             ("Summarizing and translating", summarize_and_translate),
             ("Processing and aligning subtitles", process_and_align_subtitles),

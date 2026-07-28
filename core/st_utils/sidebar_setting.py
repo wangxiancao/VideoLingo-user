@@ -19,9 +19,6 @@ def page_setting():
         update_key("display_language", DISPLAY_LANGUAGES[display_language])
         st.rerun()
 
-    # with st.expander(t("Youtube Settings"), expanded=True):
-    #     config_input(t("Cookies Path"), "youtube.cookies_path")
-
     with st.expander(t("LLM Configuration"), expanded=True):
         config_input(t("API_KEY"), "api.key")
         config_input(t("BASE_URL"), "api.base_url", help=t("Openai format, will add /v1/chat/completions automatically"))
@@ -59,14 +56,7 @@ def page_setting():
                 update_key("whisper.language", langs[lang])
                 st.rerun()
 
-        runtime = st.selectbox(t("WhisperX Runtime"), options=["local", "cloud", "elevenlabs"], index=["local", "cloud", "elevenlabs"].index(load_key("whisper.runtime")), help=t("Local runtime requires >8GB GPU, cloud runtime requires 302ai API key, elevenlabs runtime requires ElevenLabs API key"))
-        if runtime != load_key("whisper.runtime"):
-            update_key("whisper.runtime", runtime)
-            st.rerun()
-        if runtime == "cloud":
-            config_input(t("WhisperX 302ai API"), "whisper.whisperX_302_api_key")
-        if runtime == "elevenlabs":
-            config_input(("ElevenLabs API"), "whisper.elevenlabs_api_key")
+
 
         with c2:
             target_language = st.text_input(t("Target Lang"), value=load_key("target_language"), help=t("Input any language in natural language, as long as llm can understand"))
@@ -84,80 +74,14 @@ def page_setting():
             update_key("burn_subtitles", burn_subtitles)
             st.rerun()
     with st.expander(t("Dubbing Settings"), expanded=True):
-        tts_methods = ["azure_tts", "azure_direct_tts", "openai_tts", "fish_tts", "sf_fish_tts", "edge_tts", "gpt_sovits", "custom_tts", "sf_cosyvoice2", "f5tts", "indextts2"]
+        tts_methods = ["custom_tts", "indextts2"]
         select_tts = st.selectbox(t("TTS Method"), options=tts_methods, index=tts_methods.index(load_key("tts_method")))
         if select_tts != load_key("tts_method"):
             update_key("tts_method", select_tts)
             st.rerun()
 
         # sub settings for each tts method
-        if select_tts == "sf_fish_tts":
-            config_input(t("SiliconFlow API Key"), "sf_fish_tts.api_key")
-            
-            # Add mode selection dropdown
-            mode_options = {
-                "preset": t("Preset"),
-                "custom": t("Refer_stable"),
-                "dynamic": t("Refer_dynamic")
-            }
-            selected_mode = st.selectbox(
-                t("Mode Selection"),
-                options=list(mode_options.keys()),
-                format_func=lambda x: mode_options[x],
-                index=list(mode_options.keys()).index(load_key("sf_fish_tts.mode")) if load_key("sf_fish_tts.mode") in mode_options.keys() else 0
-            )
-            if selected_mode != load_key("sf_fish_tts.mode"):
-                update_key("sf_fish_tts.mode", selected_mode)
-                st.rerun()
-            if selected_mode == "preset":
-                config_input("Voice", "sf_fish_tts.voice")
-
-        elif select_tts == "openai_tts":
-            config_input("302ai API", "openai_tts.api_key")
-            config_input(t("OpenAI Voice"), "openai_tts.voice")
-
-        elif select_tts == "fish_tts":
-            config_input("302ai API", "fish_tts.api_key")
-            fish_tts_character = st.selectbox(t("Fish TTS Character"), options=list(load_key("fish_tts.character_id_dict").keys()), index=list(load_key("fish_tts.character_id_dict").keys()).index(load_key("fish_tts.character")))
-            if fish_tts_character != load_key("fish_tts.character"):
-                update_key("fish_tts.character", fish_tts_character)
-                st.rerun()
-
-        elif select_tts == "azure_tts":
-            config_input("302ai API", "azure_tts.api_key")
-            config_input(t("Azure Voice"), "azure_tts.voice")
-
-        elif select_tts == "azure_direct_tts":
-            config_input(t("Azure Speech Key"), "azure_direct_tts.api_key")
-            config_input(t("Azure Region"), "azure_direct_tts.region", help="e.g. eastus, westeurope, eastasia")
-            config_input(t("Azure Voice"), "azure_direct_tts.voice")
-        
-        elif select_tts == "gpt_sovits":
-            st.info(t("Please refer to Github homepage for GPT_SoVITS configuration"))
-            config_input(t("SoVITS Character"), "gpt_sovits.character")
-            
-            refer_mode_options = {1: t("Mode 1: Use provided reference audio only"), 2: t("Mode 2: Use first audio from video as reference"), 3: t("Mode 3: Use each audio from video as reference")}
-            selected_refer_mode = st.selectbox(
-                t("Refer Mode"),
-                options=list(refer_mode_options.keys()),
-                format_func=lambda x: refer_mode_options[x],
-                index=list(refer_mode_options.keys()).index(load_key("gpt_sovits.refer_mode")),
-                help=t("Configure reference audio mode for GPT-SoVITS")
-            )
-            if selected_refer_mode != load_key("gpt_sovits.refer_mode"):
-                update_key("gpt_sovits.refer_mode", selected_refer_mode)
-                st.rerun()
-                
-        elif select_tts == "edge_tts":
-            config_input(t("Edge TTS Voice"), "edge_tts.voice")
-
-        elif select_tts == "sf_cosyvoice2":
-            config_input(t("SiliconFlow API Key"), "sf_cosyvoice2.api_key")
-        
-        elif select_tts == "f5tts":
-            config_input("302ai API", "f5tts.302_api")
-
-        elif select_tts == "indextts2":
+        if select_tts == "indextts2":
             st.info(t("IndexTTS2 runs as a local worker and uses preset reference voices."))
             preset_voices = list(load_key("indextts2.preset_voices").keys())
             selected_preset_voice = st.selectbox(

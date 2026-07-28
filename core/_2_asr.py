@@ -20,18 +20,10 @@ def transcribe():
     # 3. Extract audio
     segments = split_audio(_RAW_AUDIO_FILE)
     
-    # 4. Transcribe audio by clips
+    # 4. Transcribe audio by clips (Qwen3-ASR + ForcedAligner, the only supported backend)
     all_results = []
-    runtime = load_key("whisper.runtime")
-    if runtime == "local":
-        from core.asr_backend.whisperX_local import transcribe_audio as ts
-        rprint("[cyan]🎤 Transcribing audio with local model...[/cyan]")
-    elif runtime == "cloud":
-        from core.asr_backend.whisperX_302 import transcribe_audio_302 as ts
-        rprint("[cyan]🎤 Transcribing audio with 302 API...[/cyan]")
-    elif runtime == "elevenlabs":
-        from core.asr_backend.elevenlabs_asr import transcribe_audio_elevenlabs as ts
-        rprint("[cyan]🎤 Transcribing audio with ElevenLabs API...[/cyan]")
+    from core.asr_backend.qwen3_asr import transcribe_audio_qwen3 as ts
+    rprint("[cyan]🎤 Transcribing audio with Qwen3-ASR + ForcedAligner...[/cyan]")
 
     for start, end in segments:
         result = ts(_RAW_AUDIO_FILE, vocal_audio, start, end)
@@ -45,6 +37,10 @@ def transcribe():
     # 6. Process df
     df = process_transcription(combined_result)
     save_results(df)
+
+    # 7. Build and save sentence-level data
+    from core.asr_backend.audio_preprocess import build_and_save_sentences
+    build_and_save_sentences(df)
         
 if __name__ == "__main__":
     transcribe()

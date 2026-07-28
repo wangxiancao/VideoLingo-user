@@ -26,17 +26,9 @@ target_language: '简体中文'
 demucs: true
 
 whisper:
-  # ["large-v3", "large-v3-turbo"]. Note: for zh model will force to use Belle/large-v3
-  model: 'large-v3'
   # Whisper specified recognition language ISO 639-1
   language: 'en'
   detected_language: 'en'
-  # Whisper running mode ["local", "cloud", "elevenlabs"]. Specifies where to run, cloud uses 302.ai API
-  runtime: 'local'
-  # 302.ai API key
-  whisperX_302_api_key: 'your_302_api_key'
-  # ElevenLabs API key (experimental)
-  elevenlabs_api_key: 'your_elevenlabs_api_key'
 
 # Whether to burn subtitles into the video
 burn_subtitles: true
@@ -71,60 +63,8 @@ reflect_translate: true
 pause_before_translate: false
 
 ## ======================== Dubbing Settings ======================== ##
-# TTS selection [sf_fish_tts, openai_tts, gpt_sovits, azure_tts, azure_direct_tts, fish_tts, edge_tts, custom_tts, indextts2]
+# TTS selection: only "custom_tts" and "indextts2" are supported
 tts_method: 'indextts2'
-
-# SiliconFlow FishTTS
-sf_fish_tts:
-  # SiliconFlow API key
-  api_key: 'YOUR_API_KEY'
-  # only for mode "preset"
-  voice: 'anna'
-  # *only for mode "custom", dont set manually
-  custom_name: ''
-  voice_id: ''
-  # preset, custom, dynamic
-  mode: "preset"
-
-# OpenAI TTS-1 API configuration, 302.ai API only
-openai_tts:
-  api_key: 'your_302_api_key'
-  voice: 'echo'
-
-# Azure configuration, 302.ai API only
-azure_tts:
-  api_key: 'your_302_api_key'
-  voice: 'zh-CN-YunfengNeural'
-
-# Azure Direct Speech Service (not through 302.ai proxy)
-azure_direct_tts:
-  api_key: 'YOUR_AZURE_SPEECH_KEY'
-  region: 'eastus'
-  voice: 'zh-CN-YunxiNeural'
-
-# FishTTS configuration, 302.ai API only
-fish_tts:
-  api_key: 'your_302_api_key'
-  character: '丁真'
-  character_id_dict:
-    'AD学姐': '7f92f8afb8ec43bf81429cc1c9199cb1'
-    '丁真': '54a5170264694bfc8e9ad98df7bd89c3'
-
-# SiliconFlow CosyVoice2 Clone
-sf_cosyvoice2:
-  api_key: 'YOUR_SF_KEY'
-
-# Edge TTS configuration
-edge_tts:
-  voice: 'zh-CN-XiaoxiaoNeural'
-
-# SoVITS configuration
-gpt_sovits:
-  character: 'Huanyuv2'
-  refer_mode: 3
-
-f5tts:
-  302_api: 'YOUR_302_API_KEY'
 
 # IndexTTS2 local worker configuration
 indextts2:
@@ -160,9 +100,6 @@ tolerance: 1.5 # Allowed extension time to the next subtitle
 
 
 ## ======================== Additional settings ======================== ##
-
-# Whisper model directory
-model_dir: './_model_cache'
 
 # Supported upload video formats
 allowed_video_formats:
