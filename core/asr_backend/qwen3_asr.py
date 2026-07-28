@@ -1,3 +1,13 @@
+import os
+
+# vLLM forks its engine-core subprocess by default. Since this process already
+# initializes CUDA (ForcedAligner load / is_available() check), a forked child
+# inherits that state and torch refuses to re-init CUDA there, raising
+# "Cannot re-initialize CUDA in forked subprocess". vLLM reads this env var via
+# get_mp_context() — NOT Python's global set_start_method — so we set it here,
+# before qwen_asr is imported (that import pulls in vllm).
+os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+
 import torch
 import librosa
 from qwen_asr import Qwen3ASRModel
@@ -60,14 +70,52 @@ def get_model():
 
     if backend == "vllm":
         gpu_mem_util = load_key("qwen3_asr.gpu_memory_utilization")
-        rprint(f"[cyan]🔄 Loading Qwen3-ASR (vLLM): {model_name}, GPU mem util={gpu_mem_util}[/cyan]")
+        rprint(f"[cyan]🔄 Loading Qwen3-ASR (vLLM native): {model_name}, GPU mem util={gpu_mem_util}[/cyan]")
         rprint(f"[cyan]🔄 Forced aligner: {aligner_name} (transformers, device={device})[/cyan]")
 
-        _MODEL = Qwen3ASRModel.LLM(
+        # qwen-asr registers a pre-v0.16 vLLM shim (Qwen3ASRForConditionalGeneration)
+        # into vLLM's ModelRegistry at import time (qwen_asr/__init__.py). On vLLM >=0.16
+        # that shim's _get_data_parser API was removed, breaking engine init. Re-register
+        # vLLM's native class so the engine builds with the current API. We bypass
+        # Qwen3ASRModel.LLM() (which couples to the shim) and construct the wrapper
+        # directly with a native vllm.LLM, reusing qwen-asr's .transcribe() orchestration.
+        from vllm.model_executor.models.qwen3_asr import Qwen3ASRForConditionalGeneration as _NativeQwen3ASR
+        from vllm import ModelRegistry
+        ModelRegistry.register_model("Qwen3ASRForConditionalGeneration", _NativeQwen3ASR)
+
+        from vllm import LLM as vLLM, SamplingParams
+        from qwen_asr.core.transformers_backend import Qwen3ASRProcessor
+        from qwen_asr.inference.qwen3_forced_aligner import Qwen3ForcedAligner
+
+        # Release GPU memory cached by prior stages (e.g. Demucs vocal
+        # separation) so vLLM profiles a cleaner free-memory state.
+        torch.cuda.empty_cache()
+
+        llm = vLLM(
             model=model_name,
             gpu_memory_utilization=gpu_mem_util,
-            forced_aligner=aligner_name,
-            forced_aligner_kwargs=aligner_kwargs,
+            limit_mm_per_prompt={"audio": 1},
+            # Model default is 65536 (≈20 min audio). ForcedAligner chunks at
+            # 180s (≈10K tokens), so 32768 (≈600s) is ample and keeps the KV
+            # cache small enough to coexist with the ForcedAligner on one GPU.
+            max_model_len=32768,
+        )
+        processor = Qwen3ASRProcessor.from_pretrained(model_name, fix_mistral_regex=True)
+        sampling_params = SamplingParams(temperature=0.0, max_tokens=4096)
+        forced_aligner_model = Qwen3ForcedAligner.from_pretrained(aligner_name, **aligner_kwargs)
+
+        _MODEL = Qwen3ASRModel(
+            backend="vllm",
+            model=llm,
+            processor=processor,
+            sampling_params=sampling_params,
+            forced_aligner=forced_aligner_model,
+            # Process one audio chunk at a time. With -1 (qwen-asr's default for
+            # vLLM), all ~6 chunks (180s each) are batched into one forward pass,
+            # producing a logits tensor of batch×seq×vocab ≈ 5 GB that OOMs
+            # alongside vLLM. Batch size 1 keeps peak ForcedAligner memory ~2-3 GB.
+            max_inference_batch_size=1,
+            max_new_tokens=None,
         )
     else:
         dtype_kwargs = {}

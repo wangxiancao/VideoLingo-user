@@ -42,11 +42,12 @@ import sys
 import ctypes
 
 # ------------
-# LD_LIBRARY_PATH fix: conda env lib must be searched before system libs.
+# LD_LIBRARY_PATH fix: the Python environment's lib dir (conda, uv venv, or
+# standard venv) must be searched before system libs so libstdc++ ABI matches.
 # Setting os.environ is too late — the dynamic linker only reads LD_LIBRARY_PATH
 # at process startup. So we detect the problem and re-exec ourselves.
 # ------------
-_conda_lib = os.path.join(sys.prefix, "lib")
+_env_lib = os.path.join(sys.prefix, "lib")
 
 def _cxxabi_ok():
     """Check if libopenvino_c can be loaded with current libstdc++."""
@@ -56,9 +57,9 @@ def _cxxabi_ok():
     except OSError:
         return False
 
-if os.path.isdir(_conda_lib) and _conda_lib not in os.environ.get("LD_LIBRARY_PATH", ""):
+if os.path.isdir(_env_lib) and _env_lib not in os.environ.get("LD_LIBRARY_PATH", ""):
     if not _cxxabi_ok():
-        os.environ["LD_LIBRARY_PATH"] = _conda_lib + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")
+        os.environ["LD_LIBRARY_PATH"] = _env_lib + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
 import shutil
@@ -147,8 +148,9 @@ def apply_tts_workers_override(n):
     No-op when n is None or tts_method isn't indextts2.
 
     Writes the YAML directly via ruamel rather than update_key, because
-    update_key refuses to add a key that doesn't yet exist — and existing
-    config.yaml files only have the singular `port:` field.
+    update_key refuses to add a key that doesn't yet exist — needed for
+    older config.yaml files that predate the `ports:` list. The current
+    template ships both `port:` (base) and `ports:` (worker pool).
     """
     from core.utils.config_utils import load_key, CONFIG_PATH, lock, yaml
 
@@ -167,8 +169,9 @@ def apply_tts_workers_override(n):
     base_port = int(load_key("indextts2.port"))
     ports = [base_port + i for i in range(n)]
 
-    # ponytail: direct YAML edit. update_key can't add a missing key, and we
-    # don't want to require users to manually migrate config.yaml.
+    # ponytail: direct YAML edit. update_key can't add a missing key, so
+    # write `ports` directly — handles current configs (already ship ports:)
+    # and legacy ones that only have the singular port: field.
     with lock:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             data = yaml.load(f)

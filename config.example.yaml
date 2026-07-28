@@ -30,6 +30,25 @@ whisper:
   language: 'en'
   detected_language: 'en'
 
+# Qwen3-ASR backend configuration (the only ASR backend)
+qwen3_asr:
+  # Inference backend: 'vllm' (5-10x faster, GPU only) or 'transformers' (compatible, supports CPU)
+  backend: 'vllm'
+  # Model size: 'Qwen/Qwen3-ASR-1.7B' (better accuracy) or 'Qwen/Qwen3-ASR-0.6B' (lower VRAM)
+  model: 'Qwen/Qwen3-ASR-1.7B'
+  # Forced aligner for word-level timestamps (~37ms precision)
+  forced_aligner: 'Qwen/Qwen3-ForcedAligner-0.6B'
+  # Device: 'auto' (cuda if available), 'cuda', or 'cpu'. vLLM requires CUDA
+  device: 'auto'
+  # Data type: 'bfloat16', 'float16', or 'int8'
+  dtype: 'bfloat16'
+  # vLLM GPU memory utilization (0.0-1.0), only used when backend == 'vllm'
+  # 0.5 is tuned for 24GB GPUs so the ForcedAligner (same GPU) has room for 180s
+  # audio chunk activations. Increase for larger GPUs (e.g. 0.7 for 48GB+).
+  gpu_memory_utilization: 0.5
+  # Hot words / domain terms to boost recognition accuracy (comma-separated)
+  hot_words: ''
+
 # Whether to burn subtitles into the video
 burn_subtitles: true
 

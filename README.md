@@ -115,7 +115,7 @@ docker run -d -p 8501:8501 --gpus all videolingo
 ## APIs
 VideoLingo supports OpenAI-Like API format and various TTS interfaces:
 - LLM: `claude-3-5-sonnet`, `gpt-4.1`, `deepseek-v3`, `gemini-2.0-flash`, ... (sorted by performance, be cautious with gemini-2.5-flash...)
-- ASR: **Qwen3-ASR + ForcedAligner** (local GPU)
+- ASR: **Qwen3-ASR + ForcedAligner** (local GPU, vLLM-accelerated with transformers fallback)
 - TTS: `custom-tts`, **`indextts2`**
 
 > **Note:** VideoLingo works with **[302.ai](https://gpt302.saaslink.net/C2oHR9)** for LLM API. Or run fully locally with Qwen3-ASR + a local LLM + IndexTTS2 for free, no API needed!
