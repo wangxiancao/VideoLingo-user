@@ -6,8 +6,6 @@
 
 <a href="https://trendshift.io/repositories/12200" target="_blank"><img src="https://trendshift.io/api/badge/repositories/12200" alt="Huanshere%2FVideoLingo | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
-[**English**](/README.md)｜[**简体中文**](/translations/README.zh.md)｜[**繁體中文**](/translations/README.zh-TW.md)｜[**日本語**](/translations/README.ja.md)｜[**Español**](/translations/README.es.md)｜[**Русский**](/translations/README.ru.md)｜[**Français**](/translations/README.fr.md)
-
 </div>
 
 ## 🌟 Overview ([Try VL Now!](https://videolingo.io))
@@ -62,7 +60,7 @@ https://github.com/user-attachments/assets/e065fe4c-3694-477f-b4d6-316917df7c0a
 
 **Input Language Support (99 languages via Whisper):**
 
-🇺🇸 English 🤩 | 🇨🇳 Chinese 🤩 | 🇯🇵 Japanese 🤩 | 🇫🇷 French 🤩 | 🇩🇪 German 🤩 | 🇮🇹 Italian 🤩 | 🇪🇸 Spanish 🤩 | 🇷🇺 Russian 😊 | 🇰🇷 Korean 🤩 | 🇵🇹 Portuguese 🤩 | 🇻🇳 Vietnamese | 🇹🇭 Thai | 🇮🇩 Indonesian | 🇲🇾 Malay | 🇹🇷 Turkish | 🇳🇱 Dutch | 🇵🇱 Polish | 🇸🇪 Swedish | 🇫🇮 Finnish | 🇩🇰 Danish | 🇨🇿 Czech | 🇭🇺 Hungarian | 🇷🇴 Romanian | 🇬🇷 Greek | 🇸🇦 Arabic | 🇮🇳 Hindi | 🇮🇷 Persian | 🇵🇭 Filipino | 🇲🇰 Macedonian | 🇨🇦 Cantonese + 22 Chinese dialects (Sichuan, Minnan, Wu, Northeastern, ...)
+🇺🇸 English 🤩 | 🇨🇳 Chinese 🤩 | 🇯🇵 Japanese 🤩 | 🇫🇷 French 🤩 | 🇩🇪 German 🤩 | 🇮🇹 Italian 🤩 | 🇪🇸 Spanish 🤩 | 🇷🇺 Russian 😊 | 🇰🇷 Korean 🤩 | 🇵🇹 Portuguese 🤩 | 🇻🇳 Vietnamese | 🇹🇭 Thai | 🇮🇩 Indonesian | 🇲🇾 Malay | 🇹🇷 Turkish | 🇳🇱 Dutch | 🇵🇱 Polish | 🇸🇪 Swedish | 🇫🇮 Finnish | 🇩🇰 Danish | 🇨🇿 Czech | 🇭🇺 Hungarian | 🇷🇴 Romanian | 🇬🇷 Greek | 🇸🇦 Arabic | 🇮🇳 Hindi | 🇮🇷 Persian | 🇵🇭 Filipino | 🇲🇰 Macedonian | 🇨🇦 Cantonese + 70 more languages
 
 > Whisper also supports **code-switching** (mixed-language audio, e.g. Chinese-English).
 
@@ -105,12 +103,31 @@ streamlit run st.py
 ```
 
 ### Docker
-Alternatively, you can use Docker (requires CUDA 12.4 and NVIDIA Driver version >550), see [Docker docs](/docs/pages/docs/docker.en-US.md):
+Alternatively, you can use Docker (requires CUDA 12.4+ and NVIDIA Driver version >550), see [Docker docs](/docs/pages/docs/docker.en-US.md):
 
 ```bash
 docker build -t videolingo .
 docker run -d -p 8501:8501 --gpus all videolingo
 ```
+
+## Architecture
+
+VideoLingo's pipeline consists of 12 numbered stages, each producing intermediate artifacts:
+
+| Stage | Module | Description |
+|---|---|---|
+| 1 | `_1_ytdlp.py` | Video download / file import |
+| 2 | `_2_asr.py` | **Whisper-large-v3-turbo** transcription with word-level DTW timestamps |
+| 3 | `_3_1_split_nlp.py` / `_3_2_split_meaning.py` | NLP + AI-powered sentence segmentation |
+| 4 | `_4_1_summarize.py` / `_4_2_translate.py` | AI summary + 3-step translation (Reflect-Adapt) |
+| 5 | `_5_split_sub.py` | Subtitle length optimization |
+| 6 | `_6_gen_sub.py` | Timestamp alignment + subtitle generation |
+| 7 | `_7_sub_into_vid.py` | Burn subtitles into video |
+| 8-12 | `_8`–`_12` | TTS dubbing pipeline (IndexTTS2 / custom TTS) |
+
+**ASR**: [Whisper-large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo) (809M params) via `transformers` pipeline with `return_timestamps="word"`. No external ASR packages required — just `transformers` + `torch`.
+
+**TTS**: [IndexTTS2](https://github.com/index-tts/index-tts) voice cloning (runs as separate HTTP worker) or user-implementable `custom_tts` hook.
 
 ## APIs
 VideoLingo supports OpenAI-Like API format and various TTS interfaces:
@@ -121,6 +138,19 @@ VideoLingo supports OpenAI-Like API format and various TTS interfaces:
 > **Note:** VideoLingo works with **[302.ai](https://gpt302.saaslink.net/C2oHR9)** for LLM API. Or run fully locally with Whisper + a local LLM + IndexTTS2 for free, no API needed!
 
 For detailed installation, API configuration, and batch mode instructions, please refer to the documentation: [English](/docs/pages/docs/start.en-US.md) | [中文](/docs/pages/docs/start.zh-CN.md)
+
+### CLI Usage
+
+```bash
+# Subtitles only (default)
+python translate_video.py /path/to/video.mp4
+
+# Subtitles + dubbing
+python translate_video.py --mode tts /path/to/video.mp4
+
+# From YouTube URL
+python translate_video.py --mode tts https://www.youtube.com/watch?v=xxx
+```
 
 ## Current Limitations
 
