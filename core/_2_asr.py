@@ -20,10 +20,10 @@ def transcribe():
     # 3. Extract audio
     segments = split_audio(_RAW_AUDIO_FILE)
     
-    # 4. Transcribe audio by clips (Qwen3-ASR + ForcedAligner, the only supported backend)
+    # 4. Transcribe audio by clips (Whisper-large-v3-turbo with word-level timestamps)
     all_results = []
-    from core.asr_backend.qwen3_asr import transcribe_audio_qwen3 as ts
-    rprint("[cyan]🎤 Transcribing audio with Qwen3-ASR + ForcedAligner...[/cyan]")
+    from core.asr_backend.whisper_asr import transcribe_audio_whisper as ts
+    rprint("[cyan]🎤 Transcribing audio with Whisper...[/cyan]")
 
     for start, end in segments:
         result = ts(_RAW_AUDIO_FILE, vocal_audio, start, end)

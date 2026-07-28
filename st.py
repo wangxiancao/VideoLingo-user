@@ -20,7 +20,7 @@ def text_processing_section():
         <p style='font-size: 20px;'>
         {t("This stage includes the following steps:")}
         <p style='font-size: 20px;'>
-            1. {t("Qwen3-ASR word-level transcription")}<br>
+            1. {t("Whisper word-level transcription")}<br>
             2. {t("Sentence segmentation using NLP and LLM")}<br>
             3. {t("Summarization and multi-step translation")}<br>
             4. {t("Cutting and aligning long subtitles")}<br>

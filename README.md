@@ -17,7 +17,7 @@ VideoLingo is an all-in-one video translation, localization, and dubbing tool ai
 Key features:
 - 🎥 YouTube video download via yt-dlp
 
-- **🎙️ Word-level subtitle recognition with Qwen3-ASR + ForcedAligner (~37ms timestamp precision, 30+ languages, 22 Chinese dialects)**
+- **🎙️ Word-level subtitle recognition with Whisper-large-v3-turbo (99 languages, DTW cross-attention word timestamps)**
 
 - **📝 NLP and AI-powered subtitle segmentation**
 
@@ -60,11 +60,11 @@ https://github.com/user-attachments/assets/e065fe4c-3694-477f-b4d6-316917df7c0a
 
 ### Language Support
 
-**Input Language Support (30+ languages via Qwen3-ASR):**
+**Input Language Support (99 languages via Whisper):**
 
 🇺🇸 English 🤩 | 🇨🇳 Chinese 🤩 | 🇯🇵 Japanese 🤩 | 🇫🇷 French 🤩 | 🇩🇪 German 🤩 | 🇮🇹 Italian 🤩 | 🇪🇸 Spanish 🤩 | 🇷🇺 Russian 😊 | 🇰🇷 Korean 🤩 | 🇵🇹 Portuguese 🤩 | 🇻🇳 Vietnamese | 🇹🇭 Thai | 🇮🇩 Indonesian | 🇲🇾 Malay | 🇹🇷 Turkish | 🇳🇱 Dutch | 🇵🇱 Polish | 🇸🇪 Swedish | 🇫🇮 Finnish | 🇩🇰 Danish | 🇨🇿 Czech | 🇭🇺 Hungarian | 🇷🇴 Romanian | 🇬🇷 Greek | 🇸🇦 Arabic | 🇮🇳 Hindi | 🇮🇷 Persian | 🇵🇭 Filipino | 🇲🇰 Macedonian | 🇨🇦 Cantonese + 22 Chinese dialects (Sichuan, Minnan, Wu, Northeastern, ...)
 
-> Qwen3-ASR also supports **code-switching** (mixed-language audio, e.g. Chinese-English) natively.
+> Whisper also supports **code-switching** (mixed-language audio, e.g. Chinese-English).
 
 **Translation supports all languages, while dubbing language depends on the chosen TTS method.**
 
@@ -115,30 +115,30 @@ docker run -d -p 8501:8501 --gpus all videolingo
 ## APIs
 VideoLingo supports OpenAI-Like API format and various TTS interfaces:
 - LLM: `claude-3-5-sonnet`, `gpt-4.1`, `deepseek-v3`, `gemini-2.0-flash`, ... (sorted by performance, be cautious with gemini-2.5-flash...)
-- ASR: **Qwen3-ASR + ForcedAligner** (local GPU, vLLM-accelerated with transformers fallback)
+- ASR: **Whisper-large-v3-turbo** (local GPU, transformers pipeline with DTW word timestamps)
 - TTS: `custom-tts`, **`indextts2`**
 
-> **Note:** VideoLingo works with **[302.ai](https://gpt302.saaslink.net/C2oHR9)** for LLM API. Or run fully locally with Qwen3-ASR + a local LLM + IndexTTS2 for free, no API needed!
+> **Note:** VideoLingo works with **[302.ai](https://gpt302.saaslink.net/C2oHR9)** for LLM API. Or run fully locally with Whisper + a local LLM + IndexTTS2 for free, no API needed!
 
 For detailed installation, API configuration, and batch mode instructions, please refer to the documentation: [English](/docs/pages/docs/start.en-US.md) | [中文](/docs/pages/docs/start.zh-CN.md)
 
 ## Current Limitations
 
-1. ASR transcription quality depends on audio clarity. For videos with loud background music, please enable Voice Separation Enhancement (Demucs). Qwen3-ASR's ForcedAligner provides ~37ms timestamp precision, significantly better than wav2vac-based alignment.
+1. ASR transcription quality depends on audio clarity. For videos with loud background music, please enable Voice Separation Enhancement (Demucs). Whisper-large-v3-turbo provides word-level timestamps via DTW cross-attention alignment.
 
 2. Using weaker models can lead to errors during processes due to strict JSON format requirements for responses (tried my best to prompt llm😊). If this error occurs, please delete the `output` folder and retry with a different LLM, otherwise repeated execution will read the previous erroneous response causing the same error.
 
 3. The dubbing feature may not be 100% perfect due to differences in speech rates and intonation between languages, as well as the impact of the translation step. However, this project has implemented extensive engineering processing for speech rates to ensure the best possible dubbing results.
 
-4. **Code-switching support**: Qwen3-ASR handles mixed-language audio (e.g. Chinese-English) natively, but downstream translation and TTS stages currently process a single primary language. Full multilingual pipeline support is a work in progress.
+4. **Code-switching support**: Whisper handles mixed-language audio (e.g. Chinese-English), but downstream translation and TTS stages currently process a single primary language. Full multilingual pipeline support is a work in progress.
 
-5. **Speaker diarization**: The pipeline does not currently separate multiple speakers for independent dubbing. Qwen3-ASR does not include native diarization; this would require an external system (e.g. pyannote).
+5. **Speaker diarization**: The pipeline does not currently separate multiple speakers for independent dubbing. Whisper does not include native diarization; this would require an external system (e.g. pyannote).
 
 ## 📄 License
 
 This project is licensed under the Apache 2.0 License. Special thanks to the following open source projects for their contributions:
 
-[Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR), [yt-dlp](https://github.com/yt-dlp/yt-dlp), [json_repair](https://github.com/mangiucugna/json_repair), [BELLE](https://github.com/LianjiaTech/BELLE)
+[Whisper](https://github.com/openai/whisper), [yt-dlp](https://github.com/yt-dlp/yt-dlp), [json_repair](https://github.com/mangiucugna/json_repair), [BELLE](https://github.com/LianjiaTech/BELLE)
 
 ## 📬 Contact Me
 

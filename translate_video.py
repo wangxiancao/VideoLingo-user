@@ -293,7 +293,7 @@ def main():
 
         text_steps = [
             ("Processing input file", partial(process_input_file, file)),
-            ("Transcribing with Qwen3-ASR", _2_asr.transcribe),
+            ("Transcribing with Whisper", _2_asr.transcribe),
             ("Splitting sentences", split_sentences),
             ("Summarizing and translating", summarize_and_translate),
             ("Processing and aligning subtitles", process_and_align_subtitles),

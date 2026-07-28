@@ -126,7 +126,7 @@ def main():
         subprocess.check_call([sys.executable, "-m", "pip", "install", "torch==2.0.0", "torchaudio==2.0.0", "--index-url", "https://download.pytorch.org/whl/cu118"])
     else:
         system_name = "🍎 MacOS" if platform.system() == 'Darwin' else "💻 No NVIDIA GPU"
-        console.print(Panel(t(f"{system_name} detected, installing CPU version of PyTorch... Note: it might be slow during Qwen3-ASR transcription."), style="cyan"))
+        console.print(Panel(t(f"{system_name} detected, installing CPU version of PyTorch... Note: it might be slow during Whisper transcription."), style="cyan"))
         subprocess.check_call([sys.executable, "-m", "pip", "install", "torch==2.1.2", "torchaudio==2.1.2"])
 
     @except_handler("Failed to install project")
