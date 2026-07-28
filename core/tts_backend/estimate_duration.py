@@ -17,10 +17,6 @@ class AdvancedSyllableEstimator:
             'pause': {'space': 0.15, 'default': 0.1}
         }
 
-    def estimate_duration(self, text: str, lang: Optional[str] = None) -> float:
-        syllable_count = self.count_syllables(text, lang)
-        return syllable_count * self.duration_params.get(lang or 'default')
-
     def count_syllables(self, text: str, lang: Optional[str] = None) -> int:
         if not text.strip(): return 0
         lang = lang or self._detect_language(text)

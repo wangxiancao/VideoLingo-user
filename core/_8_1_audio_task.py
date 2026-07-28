@@ -126,10 +126,6 @@ def process_srt():
     df['start_time'] = df['start_time'].apply(lambda x: x.strftime('%H:%M:%S.%f')[:-3])
     df['end_time'] = df['end_time'].apply(lambda x: x.strftime('%H:%M:%S.%f')[:-3])
 
-    ##! No longer perform secondary trim
-    # check and trim subtitle length, for twice to ensure the subtitle length is within the limit, 允许tolerance
-    # df['text'] = df.apply(lambda x: check_len_then_trim(x['text'], x['duration']+x['tolerance']), axis=1)
-
     return df
 
 @check_file_exists(_8_1_AUDIO_TASK)

@@ -78,24 +78,7 @@ def analyze_subtitle_timing_and_speed(df):
     df['tol_dur'] = df['duration'] + df['tolerance']
     df['est_dur'] = df.apply(lambda x: estimate_duration(x['text'], ESTIMATOR), axis=1)
 
-    ## Calculate speed indicators
-    accept = load_key("speed_factor.accept") # Maximum acceptable speed factor
-    def calc_if_too_fast(row):
-        est_dur = row['est_dur']
-        tol_dur = row['tol_dur']
-        duration = row['duration']
-        tolerance = row['tolerance']
-        
-        if est_dur / accept > tol_dur:  # Even max speed factor cannot adapt
-            return 2
-        elif est_dur > tol_dur:  # Speed adjustment needed within acceptable range
-            return 1
-        elif est_dur < duration - tolerance:  # Speaking speed too slow
-            return -1
-        else:  # Normal speaking speed
-            return 0
-    
-    df['if_too_fast'] = df.apply(calc_if_too_fast, axis=1)
+    df['if_too_fast'] = df.apply(lambda row: calc_if_too_fast(row['est_dur'], row['tol_dur'], row['duration'], row['tolerance']), axis=1)
     return df
 
 def process_cutoffs(df):

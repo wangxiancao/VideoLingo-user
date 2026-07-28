@@ -33,13 +33,6 @@ OUTPUT_VIDEO = f"{OUTPUT_DIR}/output_sub.mp4"
 SRC_SRT = f"{OUTPUT_DIR}/src.srt"
 TRANS_SRT = f"{OUTPUT_DIR}/trans.srt"
     
-def check_gpu_available():
-    try:
-        result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True)
-        return 'h264_nvenc' in result.stdout
-    except:
-        return False
-
 def merge_subtitles_to_video():
     video_file = find_video_files()
     os.makedirs(os.path.dirname(OUTPUT_VIDEO), exist_ok=True)

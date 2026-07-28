@@ -1,14 +1,11 @@
 import os
 from rich.panel import Panel
-from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from core.utils import *
 from core.utils.models import *
 import pandas as pd
 import soundfile as sf
-console = Console()
 from core.asr_backend.demucs_vl import demucs_audio
-from core.utils.models import *
 
 def time_to_samples(time_str, sr):
     """Unified time conversion function"""

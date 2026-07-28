@@ -43,11 +43,6 @@ Note: Start you answer with ```json and end with ```, do not add any other text.
 """.strip()
     return split_prompt
 
-"""{{
-    "analysis": "Brief analysis of the text structure",
-    "split": "Complete sentence with [br] tags at split positions"
-}}"""
-
 ## ================================================================
 # @ step4_1_summarize.py
 def get_summary_prompt(source_content, custom_terms_json=None):
