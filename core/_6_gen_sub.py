@@ -6,7 +6,6 @@ from rich.console import Console
 import autocorrect_py as autocorrect
 from core.utils import *
 from core.utils.models import *
-from core.utils.word_align import get_timestamps_for_sentences
 console = Console()
 
 SUBTITLE_OUTPUT_CONFIGS = [ 
@@ -34,10 +33,107 @@ def convert_to_srt_format(start_time, end_time):
     end_srt = seconds_to_hmsm(end_time)
     return f"{start_srt} --> {end_srt}"
 
+def remove_punctuation(text):
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'[^\w\s]', '', text)
+    return text.strip()
+
+def show_difference(str1, str2):
+    """Show the difference positions between two strings."""
+    min_len = min(len(str1), len(str2))
+    diff_positions = []
+
+    for i in range(min_len):
+        if str1[i] != str2[i]:
+            diff_positions.append(i)
+
+    if len(str1) != len(str2):
+        diff_positions.extend(range(min_len, max(len(str1), len(str2))))
+
+    print("Difference positions:")
+    print(f"Expected sentence: {str1}")
+    print(f"Actual match: {str2}")
+    print(
+        "Position markers: "
+        + "".join(
+            "^" if i in diff_positions else " "
+            for i in range(max(len(str1), len(str2)))
+        )
+    )
+    print(f"Difference indices: {diff_positions}")
+
 def get_sentence_timestamps(df_words, df_sentences):
-    """Match sentences to word timestamps using robust sequential word-level alignment."""
-    sentences = df_sentences['Source'].tolist()
-    return get_timestamps_for_sentences(df_words, sentences)
+    """Match normalized source text exactly against the sequential ASR character stream."""
+    time_stamp_list = []
+    full_words_str = ''
+    position_to_word_idx = {}
+
+    for idx, word in enumerate(df_words['text']):
+        clean_word = remove_punctuation(word.lower())
+        start_pos = len(full_words_str)
+        full_words_str += clean_word
+        for pos in range(start_pos, len(full_words_str)):
+            position_to_word_idx[pos] = idx
+
+    current_pos = 0
+    for idx, sentence in df_sentences['Source'].items():
+        clean_sentence = remove_punctuation(sentence.lower()).replace(" ", "")
+        sentence_len = len(clean_sentence)
+
+        match_found = False
+        while current_pos <= len(full_words_str) - sentence_len:
+            if full_words_str[current_pos:current_pos + sentence_len] == clean_sentence:
+                start_word_idx = position_to_word_idx[current_pos]
+                end_word_idx = position_to_word_idx[current_pos + sentence_len - 1]
+                start_time = float(df_words['start'][start_word_idx])
+                end_time = float(df_words['end'][end_word_idx])
+                if end_time <= start_time:
+                    # Degenerate ASR timestamps (e.g. Whisper collapsing repeated
+                    # words onto one point): best-effort extend the span to the
+                    # end of the next word that actually ends later.
+                    for later_idx in range(end_word_idx + 1, len(df_words)):
+                        candidate = float(df_words['end'][later_idx])
+                        if candidate > start_time:
+                            end_time = candidate
+                            break
+                    else:
+                        end_time = start_time + 0.5
+                time_stamp_list.append((start_time, end_time))
+                current_pos += sentence_len
+                match_found = True
+                break
+            current_pos += 1
+
+        if not match_found:
+            print(f"\n⚠️ Warning: No exact match found for sentence: {sentence}")
+            show_difference(
+                clean_sentence,
+                full_words_str[current_pos:current_pos + len(clean_sentence)],
+            )
+            print("\nOriginal sentence:", df_sentences['Source'][idx])
+            raise ValueError("❎ No match found for sentence.")
+
+    return time_stamp_list
+
+def validate_positive_timestamps(df_trans_time):
+    """Reject invalid or regressed timestamps before writing subtitles."""
+    invalid = df_trans_time[
+        df_trans_time['Source'].fillna('').astype(str).str.strip().ne('')
+        & df_trans_time['duration'].le(0)
+    ]
+    if not invalid.empty:
+        details = "; ".join(
+            f"row {idx + 1}: {row['Source']!r}, timestamp={row['timestamp']}"
+            for idx, row in invalid.head(5).iterrows()
+        )
+        raise ValueError(f"Non-empty subtitles must have positive duration: {details}")
+
+    start_times = df_trans_time['timestamp'].apply(lambda value: float(value[0]))
+    regressed = start_times.diff().lt(0)
+    if regressed.any():
+        raise ValueError(
+            f"Subtitle timestamps regress in {int(regressed.sum())} row(s)"
+        )
 
 def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output_dir: str, for_display: bool = True):
     """Align timestamps and add a new timestamp column to df_translate"""
@@ -52,6 +148,7 @@ def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output
     time_stamp_list = get_sentence_timestamps(df_text, df_translate)
     df_trans_time['timestamp'] = time_stamp_list
     df_trans_time['duration'] = df_trans_time['timestamp'].apply(lambda x: x[1] - x[0])
+    validate_positive_timestamps(df_trans_time)
 
     # Remove gaps 🕳️
     for i in range(len(df_trans_time)-1):
