@@ -18,7 +18,6 @@ torchaudio>=2.0.0
 
 demucs[dev] @ git+https://github.com/adefossez/demucs
 qwen-asr
-vllm
 
 syllables
 pypinyin

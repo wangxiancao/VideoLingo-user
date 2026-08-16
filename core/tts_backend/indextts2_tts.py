@@ -1,3 +1,4 @@
+import base64
 import os
 import signal
 import subprocess
@@ -10,13 +11,10 @@ import requests
 from core.utils import load_key, rprint
 
 
-# ponytail: module-level worker pool. Single GPU saturates around 3 workers,
-# so a dict + round-robin counter is enough; no queue, no complex scheduler.
-WORKER_PROCESSES = {}  # port -> subprocess.Popen
-PORT_POOL = []         # cached list of ports we route to
-RR_LOCK = threading.Lock()
-RR_COUNTER = 0
-REFERENCE_CACHE = None  # ponytail: cache resolved reference path; config doesn't change mid-run
+SERVER_PROCESS = None
+SERVER_LOG_HANDLE = None
+REFERENCE_CACHE = None
+START_LOCK = threading.Lock()
 
 
 def _project_root():
@@ -30,144 +28,154 @@ def _resolve_path(path):
     return (_project_root() / candidate).resolve()
 
 
-def _resolve_ports():
-    """Prefer indextts2.ports (list); fallback to [indextts2.port] for backward compat."""
+def _load_optional(key, default):
     try:
-        ports = load_key("indextts2.ports")
-        if ports and isinstance(ports, list):
-            return [int(p) for p in ports]
+        return load_key(key)
     except KeyError:
-        pass
-    return [int(load_key("indextts2.port"))]
+        return default
 
 
-def worker_count():
-    """Number of TTS worker ports configured. Used by _10_gen_audio to size the pool."""
-    return len(_resolve_ports())
-
-
-def _worker_base_url(port):
-    host = load_key("indextts2.host")
+def _base_url():
+    host = _load_optional("indextts2.host", "127.0.0.1")
+    port = int(_load_optional("indextts2.port", 18721))
     return f"http://{host}:{port}"
 
 
-def _health_ok(port):
+def request_concurrency():
+    return max(1, int(_load_optional("indextts2.max_concurrency", 4)))
+
+
+def worker_count():
+    """Backward-compatible alias for the former local worker pool size."""
+    return request_concurrency()
+
+
+def _health_ok():
     try:
-        resp = requests.get(f"{_worker_base_url(port)}/health", timeout=2)
-        return resp.status_code == 200 and resp.json().get("ok") is True
-    except Exception:
+        response = requests.get(f"{_base_url()}/health", timeout=2)
+        return response.status_code == 200
+    except requests.RequestException:
         return False
 
 
-def _log_file(port):
-    path = _project_root() / "output" / "log" / f"indextts2_worker_{port}.log"
+def _log_file():
+    path = _project_root() / "output" / "log" / "vllm_omni_indextts2.log"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def _tail_log(path, limit=4000):
+def _tail_log(path, limit=6000):
     if not path.exists():
         return ""
-    data = path.read_text(encoding="utf-8", errors="replace")
-    return data[-limit:]
+    return path.read_text(encoding="utf-8", errors="replace")[-limit:]
 
 
-def _worker_cmd(port):
-    repo_dir = _resolve_path(load_key("indextts2.repo_dir"))
-    worker_script = _project_root() / "scripts" / "indextts2_worker.py"
-    if not repo_dir.exists():
-        raise FileNotFoundError(f"IndexTTS2 repo directory not found: {repo_dir}")
-    if not worker_script.exists():
-        raise FileNotFoundError(f"IndexTTS2 worker script not found: {worker_script}")
+def _runtime_python():
+    # Do NOT resolve symlinks: venv bin/python symlinks to the base interpreter,
+    # and executing the resolved path loses the venv site-packages.
+    configured = _load_optional("indextts2.vllm_omni_python", None)
+    if configured:
+        candidate = Path(configured).expanduser()
+    else:
+        repo_dir = _resolve_path(_load_optional("indextts2.repo_dir", "external/index-tts"))
+        candidate = repo_dir / ".venv" / "bin" / "python"
+    return candidate.absolute()
 
-    cmd = [
-        "uv", "run", "python", str(worker_script),
-        "--host", load_key("indextts2.host"),
-        "--port", str(port),
-        "--model-dir", "checkpoints",
+
+def _model():
+    configured = _load_optional("indextts2.model", None)
+    if configured:
+        candidate = _resolve_path(configured)
+        return str(candidate) if candidate.exists() else str(configured)
+
+    local_model = _resolve_path("external/index-tts/checkpoints")
+    if local_model.exists():
+        return str(local_model)
+    return "IndexTeam/IndexTTS-2"
+
+
+def _server_cmd():
+    runtime_python = _runtime_python()
+    launcher = _project_root() / "scripts" / "indextts2_vllm_omni_server.py"
+    if not runtime_python.exists():
+        raise FileNotFoundError(
+            f"vLLM-Omni Python not found: {runtime_python}. "
+            "Install vLLM and vLLM-Omni in the configured IndexTTS venv."
+        )
+    if not launcher.exists():
+        raise FileNotFoundError(f"vLLM-Omni launcher not found: {launcher}")
+
+    return [
+        str(runtime_python),
+        str(launcher),
+        "--host",
+        str(_load_optional("indextts2.host", "127.0.0.1")),
+        "--port",
+        str(int(_load_optional("indextts2.port", 18721))),
+        "--model",
+        _model(),
     ]
-    if load_key("indextts2.use_fp16"):
-        cmd.append("--use-fp16")
-    if load_key("indextts2.use_cuda_kernel"):
-        cmd.append("--use-cuda-kernel")
-    if load_key("indextts2.use_deepspeed"):
-        cmd.append("--use-deepspeed")
-    return cmd, repo_dir
 
 
-def _start_one_worker(port):
-    """Spawn one worker process on `port` and block until /health is ok."""
-    global WORKER_PROCESSES
+def _start_server():
+    global SERVER_PROCESS, SERVER_LOG_HANDLE
 
-    if _health_ok(port):
-        return  # external worker already up
+    if _health_ok():
+        return
+    if SERVER_PROCESS is not None and SERVER_PROCESS.poll() is None:
+        return
 
-    if port in WORKER_PROCESSES and WORKER_PROCESSES[port].poll() is None:
-        return  # we already started it
-
-    cmd, repo_dir = _worker_cmd(port)
-    log_path = _log_file(port)
-    log_handle = open(log_path, "a", encoding="utf-8")
-    log_handle.write(f"\n\nStarting IndexTTS2 worker on :{port}: {' '.join(cmd)}\n")
-    log_handle.flush()
-
-    # ponytail: start_new_session so we can killpg the whole tree. `uv run`
-    # forks a wrapper process and a child python — terminating just the
-    # wrapper orphans the child and leaks VRAM.
-    proc = subprocess.Popen(
+    cmd = _server_cmd()
+    log_path = _log_file()
+    SERVER_LOG_HANDLE = open(log_path, "a", encoding="utf-8")
+    SERVER_LOG_HANDLE.write(
+        f"\n\nStarting vLLM-Omni IndexTTS2 server: {' '.join(cmd)}\n"
+    )
+    SERVER_LOG_HANDLE.flush()
+    SERVER_PROCESS = subprocess.Popen(
         cmd,
-        cwd=repo_dir,
-        stdout=log_handle,
+        cwd=_project_root(),
+        stdout=SERVER_LOG_HANDLE,
         stderr=subprocess.STDOUT,
         text=True,
         start_new_session=True,
     )
-    WORKER_PROCESSES[port] = proc
 
-    deadline = time.time() + int(load_key("indextts2.startup_timeout"))
+    timeout = int(_load_optional("indextts2.vllm_omni_startup_timeout", 600))
+    deadline = time.time() + timeout
     while time.time() < deadline:
-        if _health_ok(port):
-            rprint(f"[green]IndexTTS2 worker on :{port} is ready[/]")
+        if _health_ok():
+            rprint(f"[green]vLLM-Omni IndexTTS2 server is ready at {_base_url()}[/]")
             return
-        if proc.poll() is not None:
+        if SERVER_PROCESS.poll() is not None:
+            error = _tail_log(log_path)
+            stop_indextts2_worker()
             raise RuntimeError(
-                f"IndexTTS2 worker on :{port} exited during startup.\n"
-                f"Log tail:\n{_tail_log(log_path)}"
+                "vLLM-Omni IndexTTS2 server exited during startup.\n"
+                f"Log tail:\n{error}"
             )
         time.sleep(2)
 
+    error = _tail_log(log_path)
+    stop_indextts2_worker()
     raise TimeoutError(
-        f"IndexTTS2 worker on :{port} did not become healthy within "
-        f"{load_key('indextts2.startup_timeout')} seconds.\n"
-        f"Log tail:\n{_tail_log(log_path)}"
+        f"vLLM-Omni IndexTTS2 server was not healthy within {timeout} seconds.\n"
+        f"Log tail:\n{error}"
     )
 
 
-_START_LOCK = threading.Lock()
-
-
-def start_all_workers():
-    """Sequentially start one worker per configured port.
-
-    Sequential on purpose: concurrent PyTorch inits fight for VRAM and
-    can trigger transient OOMs even when the steady-state fits.
-    """
-    global PORT_POOL
-    with _START_LOCK:
-        if PORT_POOL:
-            return  # already initialized this process
-        ports = _resolve_ports()
-        for port in ports:
-            _start_one_worker(port)
-        PORT_POOL = list(ports)
-
-
-def _next_port():
-    global RR_COUNTER
-    with RR_LOCK:
-        port = PORT_POOL[RR_COUNTER % len(PORT_POOL)]
-        RR_COUNTER += 1
-    return port
+def ensure_server():
+    if _health_ok():
+        return
+    if not bool(_load_optional("indextts2.auto_start", True)):
+        raise RuntimeError(
+            f"vLLM-Omni IndexTTS2 server is unavailable at {_base_url()}. "
+            "Start it with scripts/indextts2_vllm_omni_server.py or enable "
+            "indextts2.auto_start."
+        )
+    with START_LOCK:
+        if not _health_ok():
+            _start_server()
 
 
 def _resolve_reference_audio():
@@ -186,63 +194,80 @@ def _resolve_reference_audio():
     return reference
 
 
-def indextts2_tts(text, save_path, number=None, task_df=None):
-    if not PORT_POOL:
-        start_all_workers()
+def _encode_audio_data_url(path):
+    path = Path(path)
+    mime_type = {
+        ".wav": "audio/wav",
+        ".mp3": "audio/mpeg",
+        ".flac": "audio/flac",
+    }.get(path.suffix.lower(), "audio/wav")
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
 
+
+def _error_detail(response):
+    try:
+        return response.json()
+    except ValueError:
+        return response.text[:1000]
+
+
+def indextts2_tts(text, save_path, number=None, task_df=None):
+    ensure_server()
     reference = _resolve_reference_audio()
-    port = _next_port()
     output_path = _resolve_path(save_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     payload = {
-        "text": text,
-        "spk_audio_prompt": str(reference),
-        "output_path": str(output_path),
-        "verbose": False,
+        "model": _model(),
+        "input": text,
+        "response_format": "wav",
+        "ref_audio": _encode_audio_data_url(reference),
     }
-    resp = requests.post(
-        f"{_worker_base_url(port)}/synthesize",
+    api_key = str(_load_optional("indextts2.api_key", "sk-empty"))
+    response = requests.post(
+        f"{_base_url()}/v1/audio/speech",
         json=payload,
-        timeout=int(load_key("indextts2.request_timeout")),
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=int(_load_optional("indextts2.request_timeout", 300)),
     )
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"vLLM-Omni IndexTTS2 synthesis failed: {_error_detail(response)}"
+        )
+    if not response.content or not response.content.startswith(b"RIFF"):
+        raise RuntimeError("vLLM-Omni returned an empty or invalid WAV response")
+
+    partial_path = output_path.with_name(f"{output_path.name}.part")
     try:
-        data = resp.json()
-    except Exception:
-        data = {"ok": False, "error": resp.text}
-
-    if resp.status_code != 200 or not data.get("ok"):
-        raise RuntimeError(f"IndexTTS2 synthesis failed on :{port}: {data}")
-
-    print(f"Audio saved to {output_path} (via :{port})")
+        partial_path.write_bytes(response.content)
+        partial_path.replace(output_path)
+    finally:
+        partial_path.unlink(missing_ok=True)
+    print(f"Audio saved to {output_path} via vLLM-Omni")
 
 
 def stop_indextts2_worker():
-    global WORKER_PROCESSES, PORT_POOL, RR_COUNTER, REFERENCE_CACHE
+    """Stop only the vLLM-Omni server process started by this application."""
+    global SERVER_PROCESS, SERVER_LOG_HANDLE, REFERENCE_CACHE
 
-    if not WORKER_PROCESSES:
-        PORT_POOL = []
-        RR_COUNTER = 0
-        REFERENCE_CACHE = None
-        return
-
-    rprint(f"[yellow]Stopping {len(WORKER_PROCESSES)} IndexTTS2 worker(s)...[/]")
-    for port, proc in list(WORKER_PROCESSES.items()):
-        if proc.poll() is None:
-            # Kill the whole process group (uv wrapper + python child).
+    if SERVER_PROCESS is not None and SERVER_PROCESS.poll() is None:
+        rprint("[yellow]Stopping owned vLLM-Omni IndexTTS2 server...[/]")
+        try:
+            os.killpg(os.getpgid(SERVER_PROCESS.pid), signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            SERVER_PROCESS.wait(timeout=20)
+        except subprocess.TimeoutExpired:
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                os.killpg(os.getpgid(SERVER_PROCESS.pid), signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            try:
-                proc.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                proc.wait(timeout=5)
-    WORKER_PROCESSES = {}
-    PORT_POOL = []
-    RR_COUNTER = 0
+            SERVER_PROCESS.wait(timeout=5)
+
+    if SERVER_LOG_HANDLE is not None:
+        SERVER_LOG_HANDLE.close()
+    SERVER_PROCESS = None
+    SERVER_LOG_HANDLE = None
     REFERENCE_CACHE = None

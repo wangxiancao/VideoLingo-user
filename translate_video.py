@@ -10,30 +10,12 @@ Usage:
     # Subtitles + dubbing (TTS method set as tts_method in config.yaml)
     python translate_video.py --mode tts https://www.youtube.com/watch?v=xxx
 
-    Parallel IndexTTS2 (multiple worker processes on different ports):
-      --tts-workers N writes an IndexTTS2 port pool to config.yaml before the
-      pipeline starts; the client spawns one worker per port and round-robins
-      requests. Parallelism (max_workers in stage 10) auto-tracks the number of
-      ports.
-
-    Recommended N by GPU VRAM (measured, FP16, single GPU):
-      24 GB (3090/4090):   N=3   (N=4 OOMs at model load; ~6.5 GB/worker)
-      16 GB:               N=2
-      12 GB or less:       N=1   (default; same as omitting the flag)
-
-    Measured throughput on RTX 3090, 33 short Chinese subtitle lines:
-      N=1  → 0.199 lines/s  (1.00x baseline)
-      N=2  → 0.295 lines/s  (1.48x)
-      N=3  → 0.360 lines/s  (1.81x)
+    IndexTTS2 runs behind one vLLM-Omni OpenAI-compatible server. Stage 10
+    sends concurrent requests to that server:
+      --tts-concurrency N writes indextts2.max_concurrency to config.yaml.
 
     Examples:
-    python translate_video.py --mode tts --tts-workers 3 /path/to/video.mp4
-    python translate_video.py --mode tts --tts-workers 2 /path/to/video.mp4
-
-    Notes:
-      - --tts-workers is a no-op unless tts_method=='indextts2' in config.yaml.
-      - Setting N persists in config.yaml; subsequent runs without the flag
-        reuse the same pool. Pass --tts-workers 1 to revert to single-worker.
+    python translate_video.py --mode tts --tts-concurrency 4 /path/to/video.mp4
 """
 
 import argparse
@@ -129,29 +111,26 @@ def parse_args():
         help="no-tts translates subtitles only; tts translates first, then generates dubbing.",
     )
     parser.add_argument(
-        "--tts-workers",
+        "--tts-concurrency",
         type=int,
         default=None,
         help=(
-            "Number of IndexTTS2 worker processes to spawn (only used with --mode tts and "
-            "tts_method=indextts2). Writes indextts2.ports=[18721, 18722, ...] to config.yaml "
-            "before the pipeline starts. Recommended 3 for a single 24GB GPU."
+            "Maximum concurrent IndexTTS2 requests sent to the vLLM-Omni server. "
+            "Writes indextts2.max_concurrency to config.yaml."
         ),
+    )
+    parser.add_argument(
+        "--tts-workers",
+        dest="legacy_tts_workers",
+        type=int,
+        default=None,
+        help=argparse.SUPPRESS,
     )
     return parser.parse_args()
 
 
-def apply_tts_workers_override(n):
-    """Translate --tts-workers N into an IndexTTS2 port pool.
-
-    Writes to config.yaml so every downstream module reads the same pool.
-    No-op when n is None or tts_method isn't indextts2.
-
-    Writes the YAML directly via ruamel rather than update_key, because
-    update_key refuses to add a key that doesn't yet exist — needed for
-    older config.yaml files that predate the `ports:` list. The current
-    template ships both `port:` (base) and `ports:` (worker pool).
-    """
+def apply_tts_concurrency_override(n):
+    """Persist the vLLM-Omni request concurrency for downstream stage 10."""
     from core.utils.config_utils import load_key, CONFIG_PATH, lock, yaml
 
     if n is None:
@@ -159,31 +138,25 @@ def apply_tts_workers_override(n):
 
     if load_key("tts_method") != "indextts2":
         console.print(
-            "[yellow]--tts-workers ignored (tts_method is not 'indextts2')[/]"
+            "[yellow]--tts-concurrency ignored (tts_method is not 'indextts2')[/]"
         )
         return
 
     if n < 1:
-        raise ValueError(f"--tts-workers must be >= 1, got {n}")
+        raise ValueError(f"--tts-concurrency must be >= 1, got {n}")
 
-    base_port = int(load_key("indextts2.port"))
-    ports = [base_port + i for i in range(n)]
-
-    # ponytail: direct YAML edit. update_key can't add a missing key, so
-    # write `ports` directly — handles current configs (already ship ports:)
-    # and legacy ones that only have the singular port: field.
+    # update_key cannot add a missing key, so support older local configs by
+    # adding max_concurrency directly under the existing indextts2 mapping.
     with lock:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             data = yaml.load(f)
-        data["indextts2"]["ports"] = ports
+        data["indextts2"]["max_concurrency"] = n
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             yaml.dump(data, f)
 
     console.print(Panel(
-        f"[bold green]Configured IndexTTS2 worker pool[/]\n"
-        f"  ports: {ports}\n"
-        f"  max_workers: {n}\n"
-        f"  (single 24GB GPU maxes out at ~3 workers before OOM)",
+        f"[bold green]Configured vLLM-Omni IndexTTS2 concurrency[/]\n"
+        f"  max_concurrency: {n}",
         border_style="green",
     ))
 
@@ -212,7 +185,7 @@ def run_steps(steps):
                 ))
 
 
-def stop_optional_tts_workers():
+def stop_optional_tts_server():
     try:
         from core.tts_backend.indextts2_tts import stop_indextts2_worker
 
@@ -220,6 +193,15 @@ def stop_optional_tts_workers():
     except Exception as e:
         console.print(Panel(
             f"[yellow]Warning: failed to stop optional TTS worker[/]\n{e}",
+            border_style="yellow",
+        ))
+    try:
+        from core.tts_backend.cosyvoice_tts import stop_cosyvoice_server
+
+        stop_cosyvoice_server()
+    except Exception as e:
+        console.print(Panel(
+            f"[yellow]Warning: failed to stop optional CosyVoice3 server[/]\n{e}",
             border_style="yellow",
         ))
 
@@ -279,8 +261,16 @@ def main():
     file = args.video_path_or_url
 
     try:
-        # Override indextts2.ports before anything reads the config.
-        apply_tts_workers_override(args.tts_workers)
+        concurrency = (
+            args.tts_concurrency
+            if args.tts_concurrency is not None
+            else args.legacy_tts_workers
+        )
+        if args.legacy_tts_workers is not None:
+            console.print(
+                "[yellow]--tts-workers is deprecated; use --tts-concurrency.[/]"
+            )
+        apply_tts_concurrency_override(concurrency)
 
         console.print(Panel("[bold]Checking API connectivity...[/]", border_style="blue"))
         error, hint = check_api()
@@ -324,7 +314,7 @@ def main():
         console.print(Panel(f"[bold red]Pipeline failed[/]\n{e}", border_style="red"))
         sys.exit(1)
     finally:
-        stop_optional_tts_workers()
+        stop_optional_tts_server()
 
 
 if __name__ == "__main__":
