@@ -2,7 +2,12 @@ import concurrent.futures
 from difflib import SequenceMatcher
 import math
 from core.prompts import get_split_prompt
-from core.spacy_utils.load_nlp_model import init_nlp
+from core.spacy_utils.load_nlp_model import (
+    init_nlp,
+    resolve_language,
+    get_joiner_safe,
+    is_cjk_text,
+)
 from core.utils import *
 from rich.console import Console
 from rich.table import Table
@@ -10,6 +15,13 @@ from core.utils.models import _3_1_SPLIT_BY_NLP, _3_2_SPLIT_BY_MEANING
 console = Console()
 
 def tokenize_sentence(sentence, nlp):
+    # CJK scripts are collapsed into a single token by the spacy model unless a
+    # CJK model (zh/ja/ko) is loaded. Without char-level tokens, long CJK
+    # sentences would never qualify for LLM meaning-splitting.
+    if is_cjk_text(sentence):
+        model_lang = (getattr(nlp, "meta", {}) or {}).get("lang", "") or ""
+        if model_lang not in ("zh", "ja", "ko"):
+            return [t for t in sentence if not t.isspace()]
     doc = nlp(sentence)
     return [token.text for token in doc]
 
@@ -17,8 +29,8 @@ def find_split_positions(original, modified):
     split_positions = []
     parts = modified.split('[br]')
     start = 0
-    language = load_key("whisper.language")
-    joiner = get_joiner(language)
+    language = resolve_language()
+    joiner = get_joiner_safe(language, original)
 
     for i in range(len(parts) - 1):
         max_similarity = 0
@@ -97,7 +109,17 @@ def parallel_split_sentences(sentences, max_length, max_workers, nlp, retry_atte
                 new_sentences[index] = [sentence]
 
         for future, index, num_parts, sentence in futures:
-            split_result = future.result()
+            # Per-item failure isolation: one exhausted/errored LLM split must
+            # not abort the whole stage; keep that sentence unsplit instead.
+            try:
+                split_result = future.result()
+            except Exception as e:
+                console.print(
+                    f"[red]⚠️ LLM split failed for sentence {index}: {e}[/red] "
+                    f"[yellow]Keeping the sentence unsplit.[/yellow]"
+                )
+                new_sentences[index] = [sentence]
+                continue
             if split_result:
                 split_lines = split_result.strip().split('\n')
                 new_sentences[index] = [line.strip() for line in split_lines]

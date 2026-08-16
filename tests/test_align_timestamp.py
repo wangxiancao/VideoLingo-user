@@ -87,5 +87,52 @@ class AlignTimestampTests(unittest.TestCase):
         self.assertEqual(len(df_time), 3)
 
 
+class WideWordDistributionTests(unittest.TestCase):
+    """Consecutive sentences matching one wide ASR word, followed by another
+    sentence matching the SAME wide word (spilling into the next word), must
+    not produce regressing starts — validate_positive_timestamps rejected the
+    pre-fix output as 'Subtitle timestamps regress in N row(s)'."""
+
+    def test_straddler_after_wide_word_group_does_not_regress(self):
+        # Giant wide word spanning [100, 126]; two sentences inside it, then a
+        # third that starts in its tail and spills into the next word.
+        wide = "".join([
+            "今天天氣很好我們去公園散步聊聊最近的事情",   # 20 chars
+            "所以我決定明天再出發",                      # 10 chars
+        ])
+        df_words = pd.DataFrame({
+            "text": ["開頭", wide, "結束"],
+            "start": [0.0, 100.0, 126.5],
+            "end":   [3.0, 126.0, 128.0],
+        })
+        s1, s2, s3 = "今天天氣很好我們去公園散步", "聊聊最近的事情", "所以我決定明天再出發結束"
+        df_sentences = pd.DataFrame({
+            "Source": [s1, s2, s3],
+            "Translation": ["t1", "t2", "t3"],
+        })
+
+        stamps = get_sentence_timestamps(df_words, df_sentences)
+        self.assertEqual(len(stamps), 3)
+        starts = [s for s, _ in stamps]
+        # Monotonic non-regressing starts.
+        self.assertEqual(starts, sorted(starts))
+        self.assertGreaterEqual(starts[0], 100.0)
+        self.assertLessEqual(starts[2], 128.0)
+        self.assertGreater(stamps[1][1], stamps[0][0])
+        self.assertGreater(stamps[2][1], stamps[2][0])
+
+        # End-to-end: validate_positive_timestamps must accept the output and
+        # normalized rows must keep positive duration (no start+ε collapse).
+        df_time = align_timestamp(
+            df_words, df_sentences, [("trans.srt", ["Translation"])],
+            output_dir=None, for_display=False,
+        )
+        self.assertTrue((df_time["duration"] > 0).all())
+        self.assertEqual(len(df_time), 3)
+        durs = df_time["duration"].tolist()
+        # No cue may collapse to the MIN_DURATION_EPS floor (sub-second).
+        self.assertTrue(all(d > 0.5 for d in durs), durs)
+
+
 if __name__ == "__main__":
     unittest.main()

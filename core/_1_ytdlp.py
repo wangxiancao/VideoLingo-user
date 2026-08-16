@@ -1,6 +1,7 @@
 import os,sys
 import glob
 import re
+import shutil
 import subprocess
 from core.utils import *
 
@@ -33,6 +34,11 @@ def download_video_ytdlp(url, save_path='output', resolution='1080'):
         'postprocessors': [{'key': 'FFmpegThumbnailsConvertor', 'format': 'jpg'}],
     }
 
+    # yt-dlp only enables deno by default; YouTube extraction needs a JS runtime
+    # for full format/signature support, otherwise downloads can 403/throttle.
+    if shutil.which("node"):
+        ydl_opts["js_runtimes"] = {"node": {}}
+
     # Read Youtube Cookie File
     cookies_path = load_key("youtube.cookies_path")
     if os.path.exists(cookies_path):
@@ -40,8 +46,17 @@ def download_video_ytdlp(url, save_path='output', resolution='1080'):
 
     # Get YoutubeDL class after updating
     YoutubeDL = update_ytdlp()
-    with YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+    except Exception as e:
+        # Datacenter IPs often get HTTP 403 from the web player client (PO-token
+        # bot detection). Fall back to mobile player clients, which trade some
+        # bitrate for reliability.
+        rprint(f"[yellow]Default YouTube clients failed ({e}); retrying with mobile player clients[/yellow]")
+        ydl_opts["extractor_args"] = {"youtube": {"player_client": ["android", "ios", "mweb"]}}
+        with YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
     
     # Check and rename files after download
     for file in os.listdir(save_path):
@@ -56,7 +71,20 @@ def find_video_files(save_path='output'):
     # change \\ to /, this happen on windows
     if sys.platform.startswith('win'):
         video_files = [file.replace("\\", "/") for file in video_files]
-    video_files = [file for file in video_files if not file.startswith("output/output")]
+    # Exclude only the pipeline's own generated videos (output/output_sub.mp4 and
+    # output/output_dub.mp4), which live directly inside the output directory.
+    # Compare resolved paths so relative/absolute (and OS) path forms all match,
+    # instead of filtering by an "output/output" name prefix that would also hide
+    # a legitimate source file named e.g. output_final.mp4.
+    real_output_dir = os.path.normcase(os.path.realpath(save_path))
+    pipeline_outputs = {
+        os.path.join(real_output_dir, name)
+        for name in ("output_sub.mp4", "output_dub.mp4")
+    }
+    video_files = [
+        file for file in video_files
+        if os.path.normcase(os.path.realpath(file)) not in pipeline_outputs
+    ]
     if len(video_files) != 1:
         raise ValueError(f"Number of videos found {len(video_files)} is not unique. Please check.")
     return video_files[0]

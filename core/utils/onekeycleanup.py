@@ -70,11 +70,30 @@ def move_file(src, dst):
         print(f"Error message: {str(e)}")
 
 def sanitize_filename(filename):
-    # Remove or replace disallowed characters
-    invalid_chars = '<>:"/\\|?*'
-    for char in invalid_chars:
-        filename = filename.replace(char, '_')
-    return filename
+    # Whitelist approach: keep ASCII letters/digits, CJK/Japanese/Korean
+    # characters, '_' and '-'. Every other character (spaces, punctuation,
+    # symbols, fullwidth forms, emoji) is deleted, not substituted.
+    def _keep(ch):
+        if ch in ('_', '-'):
+            return True
+        if ch.isascii():
+            return ch.isalnum()
+        return (
+            '\u3400' <= ch <= '\u4dbf'    # CJK Extension A
+            or '\u4e00' <= ch <= '\u9fff'  # CJK Unified Ideographs
+            or '\uf900' <= ch <= '\ufaff'  # CJK Compatibility Ideographs
+            or '\u3040' <= ch <= '\u30ff'  # Hiragana / Katakana
+            or '\uac00' <= ch <= '\ud7af'  # Hangul syllables
+        )
+    # Sanitize stem and extension separately so archived files keep usable
+    # extensions (e.g. dub.mp3, output_sub.mp4, tts_tasks.xlsx).
+    stem, ext = os.path.splitext(filename)
+    stem = ''.join(ch for ch in stem if _keep(ch)) or 'untitled'
+    if ext:
+        ext = ''.join(ch for ch in ext if ch.isascii() and ch.isalnum())
+        if ext:
+            stem = f"{stem}.{ext}"
+    return stem
 
 if __name__ == "__main__":
     cleanup()

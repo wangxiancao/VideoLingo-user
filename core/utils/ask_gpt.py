@@ -43,14 +43,15 @@ def _load_cache(prompt, resp_type, log_title):
 # ------------
 
 @except_handler("GPT request failed", retry=5)
-def ask_gpt(prompt, resp_type=None, valid_def=None, log_title="default"):
+def ask_gpt(prompt, resp_type=None, valid_def=None, log_title="default", use_cache=True):
     if not load_key("api.key"):
         raise ValueError("API key is not set")
     # check cache
-    cached = _load_cache(prompt, resp_type, log_title)
-    if cached:
-        rprint("use cache response")
-        return cached
+    if use_cache:
+        cached = _load_cache(prompt, resp_type, log_title)
+        if cached:
+            rprint("use cache response")
+            return cached
 
     model = load_key("api.model")
     base_url = load_key("api.base_url")

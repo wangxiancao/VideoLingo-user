@@ -1,4 +1,6 @@
 import datetime
+import hashlib
+import os
 import re
 import pandas as pd
 from rich.console import Console
@@ -128,11 +130,45 @@ def process_srt():
 
     return df
 
-@check_file_exists(_8_1_AUDIO_TASK)
+def _task_input_hash():
+    """SHA-256 of the stage's input SRT (translated subs for audio)."""
+    with open(TRANS_SUBS_FOR_AUDIO_FILE, 'rb') as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+def _stored_task_input_hash(sidecar_path):
+    try:
+        with open(sidecar_path, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except (OSError, ValueError):
+        return None
+
 def gen_audio_task_main():
+    # Versioned skip: only reuse the existing task file when it was generated
+    # from the exact same input SRT. A plain "file exists" check would silently
+    # skip after the subtitles changed, producing stale TTS audio.
+    sidecar = os.path.join(_AUDIO_DIR, 'tts_tasks_input.hash')
+    input_hash = _task_input_hash()
+    if os.path.exists(_8_1_AUDIO_TASK) and _stored_task_input_hash(sidecar) == input_hash:
+        rprint(f"[yellow]⚠️ File <{_8_1_AUDIO_TASK}> already exists and matches the current input, skip <gen_audio_task_main> step.[/yellow]")
+        return
+
     df = process_srt()
     console.print(df)
-    df.to_excel(_8_1_AUDIO_TASK, index=False)
+    # Write atomically (tmp + rename) so a crashed write never leaves a
+    # truncated task file that downstream stages would consume.
+    os.makedirs(os.path.dirname(_8_1_AUDIO_TASK), exist_ok=True)
+    tmp_file = _8_1_AUDIO_TASK + '.tmp.xlsx'
+    try:
+        df.to_excel(tmp_file, index=False)
+        os.replace(tmp_file, _8_1_AUDIO_TASK)
+    finally:
+        if os.path.exists(tmp_file):
+            try:
+                os.remove(tmp_file)
+            except OSError:
+                pass
+    with open(sidecar, 'w', encoding='utf-8') as f:
+        f.write(input_hash)
     rprint(Panel(f"Successfully generated {_8_1_AUDIO_TASK}", title="Success", border_style="green"))
 
 if __name__ == '__main__':

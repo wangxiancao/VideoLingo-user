@@ -1,3 +1,6 @@
+import ast
+import hashlib
+import math
 import os
 import time
 import shutil
@@ -26,6 +29,22 @@ def parse_df_srt_time(time_str: str) -> float:
     hours, minutes, seconds = time_str.strip().split(':')
     seconds, milliseconds = seconds.split('.')
     return int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(milliseconds) / 1000
+
+def gen_file_key(number, line_index, line_text):
+    """Stable, content-addressed file key for TTS audio segments.
+
+    Includes a short hash of the subtitle text so a stale temp/output file from
+    an earlier run can never be reused for different text. Numbers are
+    normalized (1.0 -> 1) so pandas dtype differences across xlsx round-trips
+    never change a file key. KEEP IN SYNC with the identical helper in
+    core/_11_merge_audio.py.
+    """
+    text_hash = hashlib.md5(str(line_text).encode('utf-8')).hexdigest()[:10]
+    try:
+        num = int(number) if float(number).is_integer() else number
+    except (TypeError, ValueError):
+        num = number
+    return f"{num}_{line_index}_{text_hash}"
 
 def adjust_audio_speed(input_file: str, output_file: str, speed_factor: float) -> None:
     """Adjust audio speed and handle edge cases"""
@@ -65,10 +84,10 @@ def adjust_audio_speed(input_file: str, output_file: str, speed_factor: float) -
 def process_row(row: pd.Series, tasks_df: pd.DataFrame) -> Tuple[int, float]:
     """Helper function for processing single row data"""
     number = row['number']
-    lines = eval(row['lines']) if isinstance(row['lines'], str) else row['lines']
+    lines = ast.literal_eval(row['lines']) if isinstance(row['lines'], str) else row['lines']
     real_dur = 0
     for line_index, line in enumerate(lines):
-        temp_file = TEMP_FILE_TEMPLATE.format(f"{number}_{line_index}")
+        temp_file = TEMP_FILE_TEMPLATE.format(gen_file_key(number, line_index, line))
         tts_main(line, temp_file, number, tasks_df)
         real_dur += get_audio_duration(temp_file)
     return number, real_dur
@@ -94,9 +113,11 @@ def generate_tts_audio(tasks_df: pd.DataFrame) -> pd.DataFrame:
         
         tts_method = load_key("tts_method")
         if tts_method == "indextts2":
-            # ponytail: parallelism = number of worker ports (see indextts2_tts.worker_count)
-            from core.tts_backend.indextts2_tts import worker_count
-            max_workers = worker_count()
+            from core.tts_backend.indextts2_tts import request_concurrency
+            max_workers = request_concurrency()
+        elif tts_method == "cosyvoice":
+            from core.tts_backend.cosyvoice_tts import request_concurrency
+            max_workers = request_concurrency()
         else:
             max_workers = load_key("max_workers")
         # parallel processing for remaining tasks
@@ -124,22 +145,35 @@ def process_chunk(chunk_df: pd.DataFrame, accept: float, min_speed: float) -> tu
     """Process audio chunk and calculate speed factor"""
     chunk_durs = chunk_df['real_dur'].sum()
     tol_durs = chunk_df['tol_dur'].sum()
-    durations = tol_durs - chunk_df.iloc[-1]['tolerance']
+    # A negative final tolerance (overlapping subtitles) already shrinks the
+    # row's tol_dur; subtracting it again would inflate the available window.
+    durations = tol_durs - max(chunk_df.iloc[-1]['tolerance'], 0.0)
     all_gaps = chunk_df['gap'].sum() - chunk_df.iloc[-1]['gap']
     
     keep_gaps = True
     speed_var_error = 0.1
 
+    # Floor denominators so tiny/negative or zero windows never yield an
+    # invalid (infinite/nan/negative) speed factor.
+    duration_floor = max(durations - speed_var_error, 0.1)
+    tol_dur_floor = max(tol_durs - speed_var_error, 0.1)
+
     if (chunk_durs + all_gaps) / accept < durations:
-        speed_factor = max(min_speed, (chunk_durs + all_gaps) / (durations-speed_var_error))
+        speed_factor = (chunk_durs + all_gaps) / duration_floor
     elif chunk_durs / accept < durations:
-        speed_factor = max(min_speed, chunk_durs / (durations-speed_var_error))
+        speed_factor = chunk_durs / duration_floor
         keep_gaps = False
     elif (chunk_durs + all_gaps) / accept < tol_durs:
-        speed_factor = max(min_speed, (chunk_durs + all_gaps) / (tol_durs-speed_var_error))
+        speed_factor = (chunk_durs + all_gaps) / tol_dur_floor
     else:
-        speed_factor = chunk_durs / (tol_durs-speed_var_error)
+        speed_factor = chunk_durs / tol_dur_floor
         keep_gaps = False
+
+    # Guard non-finite results, then clamp into [min_speed, 100.0] (ffmpeg's
+    # atempo supports up to 100x; anything beyond must not reach ffmpeg).
+    if not math.isfinite(speed_factor) or speed_factor <= 0:
+        speed_factor = min_speed
+    speed_factor = min(max(speed_factor, min_speed), 100.0)
         
     return round(speed_factor, 3), keep_gaps
 
@@ -159,39 +193,76 @@ def merge_chunks(tasks_df: pd.DataFrame) -> pd.DataFrame:
             
             # 🎯 Step1: Start processing new timeline
             chunk_start_time = parse_df_srt_time(chunk_df.iloc[0]['start_time'])
-            chunk_end_time = parse_df_srt_time(chunk_df.iloc[-1]['end_time']) + chunk_df.iloc[-1]['tolerance'] # 加上tolerance才是这一块的结束
+            # Cast to Python float: np.float64 survives the pandas row lookup, and
+            # numpy 2.x serializes it into Excel as `np.float64(...)`, which stage
+            # 11's ast.literal_eval cannot parse.
+            chunk_end_time = float(parse_df_srt_time(chunk_df.iloc[-1]['end_time'])) + float(chunk_df.iloc[-1]['tolerance']) # 加上tolerance才是这一块的结束
             cur_time = chunk_start_time
+            last_audio_file = None
             for i, row in chunk_df.iterrows():
                 # If i is not 0, which is not the first row of the chunk, cur_time needs to be added with the gap of the previous row, remember to divide by speed_factor
                 if i != 0 and keep_gaps:
-                    cur_time += chunk_df.iloc[i-1]['gap']/speed_factor
+                    # float() keeps cur_time a plain Python float; a pandas
+                    # np.float64 here would taint cur_time and, through the
+                    # Step-5/Step-6 reassignments, the serialized new_sub_times.
+                    cur_time += float(chunk_df.iloc[i-1]['gap'])/speed_factor
                 new_sub_times = []
                 number = row['number']
-                lines = eval(row['lines']) if isinstance(row['lines'], str) else row['lines']
+                lines = ast.literal_eval(row['lines']) if isinstance(row['lines'], str) else row['lines']
                 for line_index, line in enumerate(lines):
                     # 🔄 Step2: Start speed change and save as OUTPUT_FILE_TEMPLATE
-                    temp_file = TEMP_FILE_TEMPLATE.format(f"{number}_{line_index}")
-                    output_file = OUTPUT_FILE_TEMPLATE.format(f"{number}_{line_index}")
+                    file_key = gen_file_key(number, line_index, line)
+                    temp_file = TEMP_FILE_TEMPLATE.format(file_key)
+                    output_file = OUTPUT_FILE_TEMPLATE.format(file_key)
                     adjust_audio_speed(temp_file, output_file, speed_factor)
                     ad_dur = get_audio_duration(output_file)
-                    new_sub_times.append([cur_time, cur_time+ad_dur])
+                    new_sub_times.append([
+                        float(cur_time),
+                        float(cur_time + ad_dur),
+                    ])
                     cur_time += ad_dur
+                    last_audio_file = output_file
                 # 🔄 Step3: Find corresponding main DataFrame index and update new_sub_times
-                main_df_idx = tasks_df[tasks_df['number'] == row['number']].index[0]
+                if len(new_sub_times) != len(lines):
+                    raise RuntimeError(
+                        f"Row number {row['number']} (chunk row {i}, chunk {chunk_start}-{index}) "
+                        f"produced {len(new_sub_times)} subtitle times for {len(lines)} lines"
+                    )
+                number_idx = tasks_df.index[tasks_df['number'] == row['number']]
+                if len(number_idx) > 0:
+                    main_df_idx = number_idx[0]
+                else:
+                    # Fall back to the chunk's positional index inside tasks_df
+                    main_df_idx = chunk_start + i
+                    rprint(f"[yellow]⚠️ No task row matched number {row['number']}, falling back to its positional row {main_df_idx}[/yellow]")
                 tasks_df.at[main_df_idx, 'new_sub_times'] = new_sub_times
                 # 🎯 Step4: Choose emoji based on speed_factor and accept comparison
                 emoji = "⚡" if speed_factor <= accept else "⚠️"
                 rprint(f"[cyan]{emoji} Processed chunk {chunk_start} to {index} with speed factor {speed_factor}[/cyan]")
-            # 🔄 Step5: Check if the last row exceeds the range
+            # 🔄 Step5: Fill the remaining chunk window so the dubbed timeline
+            # never silently compresses when TTS audio is shorter than the slot.
+            if cur_time < chunk_end_time and last_audio_file:
+                remainder = chunk_end_time - cur_time
+                audio = AudioSegment.from_wav(last_audio_file)
+                padded_audio = audio + AudioSegment.silent(duration=int(round(remainder * 1000)))
+                padded_audio.export(last_audio_file, format="wav")
+                last_times = tasks_df.at[index, 'new_sub_times']
+                if last_times:
+                    last_times[-1][1] = float(chunk_end_time)
+                    tasks_df.at[index, 'new_sub_times'] = last_times
+                cur_time = chunk_end_time
+                rprint(f"[cyan]⏱️ Chunk {chunk_start} to {index} was {remainder:.3f}s shorter than its window, filled trailing silence[/cyan]")
+            # 🔄 Step6: Check if the last row exceeds the range
             if cur_time > chunk_end_time:
                 time_diff = cur_time - chunk_end_time
                 if time_diff <= 0.6:  # If exceeding time is within 0.6 seconds, truncate the last audio
                     rprint(f"[yellow]⚠️ Chunk {chunk_start} to {index} exceeds by {time_diff:.3f}s, truncating last audio[/yellow]")
                     # Get the last audio file
                     last_number = tasks_df.iloc[index]['number']
-                    last_lines = eval(tasks_df.iloc[index]['lines']) if isinstance(tasks_df.iloc[index]['lines'], str) else tasks_df.iloc[index]['lines']
+                    last_lines = ast.literal_eval(tasks_df.iloc[index]['lines']) if isinstance(tasks_df.iloc[index]['lines'], str) else tasks_df.iloc[index]['lines']
                     last_line_index = len(last_lines) - 1
-                    last_file = OUTPUT_FILE_TEMPLATE.format(f"{last_number}_{last_line_index}")
+                    last_key = gen_file_key(last_number, last_line_index, last_lines[-1])
+                    last_file = OUTPUT_FILE_TEMPLATE.format(last_key)
                     
                     # Calculate the duration to keep
                     audio = AudioSegment.from_wav(last_file)
@@ -202,8 +273,9 @@ def merge_chunks(tasks_df: pd.DataFrame) -> pd.DataFrame:
                     
                     # Update the last timestamp
                     last_times = tasks_df.at[index, 'new_sub_times']
-                    last_times[-1][1] = chunk_end_time
-                    tasks_df.at[index, 'new_sub_times'] = last_times
+                    if last_times:
+                        last_times[-1][1] = float(chunk_end_time)
+                        tasks_df.at[index, 'new_sub_times'] = last_times
                 else:
                     raise Exception(f"Chunk {chunk_start} to {index} exceeds the chunk end time {chunk_end_time:.2f} seconds with current time {cur_time:.2f} seconds")
             chunk_start = index+1
@@ -230,6 +302,22 @@ def gen_audio() -> None:
     tasks_df = merge_chunks(tasks_df)
     
     # 💾 Step5: Save results
+    # Belt-and-braces: force every new_sub_times cell to plain Python floats.
+    # Even with the float() casts in merge_chunks, any stray numpy scalar that
+    # reaches this point would serialize under numpy 2.x as `np.float64(...)`,
+    # which stage 11's ast.literal_eval rejects. Empty cells (None/NaN rows
+    # never covered by a chunk) are preserved as-is.
+    def _normalize_sub_times(v):
+        if v is None:
+            return None
+        try:
+            if math.isnan(v):
+                return None
+        except TypeError:
+            pass  # not a scalar; treat as a list of pairs below
+        return [[float(a), float(b)] for a, b in v]
+
+    tasks_df['new_sub_times'] = tasks_df['new_sub_times'].apply(_normalize_sub_times)
     tasks_df.to_excel(_8_1_AUDIO_TASK, index=False)
     rprint("[bold green]🎉 Audio generation completed successfully![/bold green]")
 

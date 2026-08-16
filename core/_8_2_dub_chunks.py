@@ -55,6 +55,17 @@ def merge_rows(df, start_idx, merge_count):
         df.at[start_idx + merge_count - 1, 'cut_off'] = 1
     return merge_count
 
+def _probe_video_duration(fallback_duration):
+    """Best-effort duration of the source video; falls back to raw audio duration."""
+    try:
+        from core._1_ytdlp import find_video_files
+        video_dur = get_audio_duration(find_video_files())
+        if video_dur and video_dur > 0:
+            return video_dur
+    except Exception as e:
+        rprint(f"[yellow]⚠️ Could not probe source video duration ({e}), using raw audio duration[/yellow]")
+    return max(fallback_duration, 0.0)
+
 def analyze_subtitle_timing_and_speed(df):
     rprint("[🔍 Analyzing] Calculating subtitle timing and speed...")
     global ESTIMATOR
@@ -66,13 +77,17 @@ def analyze_subtitle_timing_and_speed(df):
     for i in range(len(df) - 1):
         current_end = datetime.datetime.strptime(df.loc[i, 'end_time'], '%H:%M:%S.%f').time()
         next_start = datetime.datetime.strptime(df.loc[i + 1, 'start_time'], '%H:%M:%S.%f').time()
-        df.loc[i, 'gap'] = time_diff_seconds(current_end, next_start, datetime.date.today())
+        # Floor at 0: negative gaps from overlapping input must not poison the
+        # cutoff/merge logic downstream.
+        df.loc[i, 'gap'] = max(time_diff_seconds(current_end, next_start, datetime.date.today()), 0.0)
     
-    # Set the gap for the last line
+    # Set the gap for the last line (against the source video duration when
+    # obtainable, falling back to the raw audio duration), never negative.
     last_end = datetime.datetime.strptime(df.iloc[-1]['end_time'], '%H:%M:%S.%f').time()
     last_end_seconds = (last_end.hour * 3600 + last_end.minute * 60 + 
                        last_end.second + last_end.microsecond / 1000000)
-    df.iloc[-1, df.columns.get_loc('gap')] = whole_dur - last_end_seconds
+    video_dur = _probe_video_duration(whole_dur)
+    df.iloc[-1, df.columns.get_loc('gap')] = max(video_dur - last_end_seconds, 0.0)
     
     df['tolerance'] = df['gap'].apply(lambda x: TOLERANCE if x > TOLERANCE else x)
     df['tol_dur'] = df['duration'] + df['tolerance']

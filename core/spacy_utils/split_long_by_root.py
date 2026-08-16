@@ -1,7 +1,14 @@
 import os
 import string
 import warnings
-from core.spacy_utils.load_nlp_model import init_nlp, SPLIT_BY_CONNECTOR_FILE
+from core.spacy_utils.load_nlp_model import (
+    init_nlp,
+    SPLIT_BY_CONNECTOR_FILE,
+    resolve_language,
+    get_joiner_safe,
+    is_cjk_text,
+    split_cjk_by_punctuation,
+)
 from core.utils import *
 from core.utils.models import _3_1_SPLIT_BY_NLP
 
@@ -30,8 +37,8 @@ def split_long_sentence(doc):
     # rebuild sentences based on optimal split points
     sentences = []
     i = n
-    language = load_key("whisper.language")
-    joiner = get_joiner(language)
+    language = resolve_language()
+    joiner = get_joiner_safe(language, doc.text)
     while i > 0:
         j = prev[i]
         sentences.append(joiner.join(tokens[j:i]).strip())
@@ -48,8 +55,8 @@ def split_extremely_long_sentence(doc):
     part_length = n // num_parts
     
     sentences = []
-    language = load_key("whisper.language")
-    joiner = get_joiner(language)
+    language = resolve_language()
+    joiner = get_joiner_safe(language, doc.text)
     for i in range(num_parts):
         start = i * part_length
         end = start + part_length if i < num_parts - 1 else n
@@ -59,21 +66,56 @@ def split_extremely_long_sentence(doc):
     return sentences
 
 
+def split_long_cjk_text(text, max_len=60):
+    """Split CJK text: first at sentence-ending punctuation, then redistribute
+    any still-too-long part into even character chunks. Used when the loaded
+    spacy model cannot segment the CJK script, so POS/ROOT-driven DP never
+    fires on these lines."""
+    parts = split_cjk_by_punctuation(text) or [text]
+    result = []
+    for part in parts:
+        if len(part) <= max_len:
+            result.append(part)
+            continue
+        n = len(part)
+        num_parts = (n + max_len - 1) // max_len
+        step = (n + num_parts - 1) // num_parts
+        result.extend(part[i * step:(i + 1) * step] for i in range(num_parts))
+    return [p for p in result if p.strip()]
+
+
 def split_long_by_root_main(nlp):
     with open(SPLIT_BY_CONNECTOR_FILE, "r", encoding="utf-8") as input_file:
         sentences = input_file.readlines()
 
     all_split_sentences = []
     for sentence in sentences:
-        doc = nlp(sentence.strip())
+        text = sentence.strip()
+        if not text:
+            continue
+
+        # CJK scripts collapse into a single token under the (English) fallback
+        # spacy model, so the token-count check and the POS/ROOT DP below never
+        # fire and multi-minute spans stay unsplit. Use character-level
+        # splitting for CJK lines instead.
+        if is_cjk_text(text):
+            if len(text) > 60:
+                split_sentences = split_long_cjk_text(text)
+                all_split_sentences.extend(split_sentences)
+                rprint(f"[yellow]✂️  Splitting long CJK sentence by characters: {text[:30]}...[/yellow]")
+            else:
+                all_split_sentences.append(text)
+            continue
+
+        doc = nlp(text)
         if len(doc) > 60:
             split_sentences = split_long_sentence(doc)
             if any(len(nlp(sent)) > 60 for sent in split_sentences):
                 split_sentences = [subsent for sent in split_sentences for subsent in split_extremely_long_sentence(nlp(sent))]
             all_split_sentences.extend(split_sentences)
-            rprint(f"[yellow]✂️  Splitting long sentences by root: {sentence[:30]}...[/yellow]")
+            rprint(f"[yellow]✂️  Splitting long sentences by root: {text[:30]}...[/yellow]")
         else:
-            all_split_sentences.append(sentence.strip())
+            all_split_sentences.append(text)
 
     punctuation = string.punctuation + "'" + '"'  # include all punctuation and apostrophe ' and "
 

@@ -1,11 +1,16 @@
 import os
 import warnings
-from core.spacy_utils.load_nlp_model import init_nlp, SPLIT_BY_COMMA_FILE, SPLIT_BY_CONNECTOR_FILE
+from core.spacy_utils.load_nlp_model import (
+    init_nlp,
+    SPLIT_BY_COMMA_FILE,
+    SPLIT_BY_CONNECTOR_FILE,
+    resolve_language,
+)
 from core.utils import rprint
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-def analyze_connectors(doc, token):
+def analyze_connectors(doc, token, lang=None):
     """
     Analyze whether a token is a connector that should trigger a sentence split.
     
@@ -16,7 +21,9 @@ def analyze_connectors(doc, token):
      4. Default to splitting for certain connectors if no other conditions are met.
      5. For coordinating conjunctions, check if they connect two independent clauses.
     """
-    lang = doc.lang_
+    # Use the resolved working language when it is known (more reliable than
+    # doc.lang_ while the fallback en model is inspecting non-English text).
+    lang = lang or (doc.lang_ if hasattr(doc, "lang_") else None)
     if lang == "en":
         connectors = ["that", "which", "where", "when", "because", "but", "and", "or"]
         mark_dep = "mark"
@@ -84,7 +91,8 @@ def analyze_connectors(doc, token):
 def split_by_connectors(text, context_words=5, nlp=None):
     doc = nlp(text)
     sentences = [doc.text]  # init
-    
+    language = resolve_language()
+
     while True:
         # Handle each task with a single cut
         # avoiding the fragmentation of a sentence into multiple parts at the same time.
@@ -96,7 +104,7 @@ def split_by_connectors(text, context_words=5, nlp=None):
             start = 0
             
             for i, token in enumerate(doc):
-                split_before, _ = analyze_connectors(doc, token)
+                split_before, _ = analyze_connectors(doc, token, lang=language)
                 
                 if i + 1 < len(doc) and doc[i + 1].text in ["'s", "'re", "'ve", "'ll", "'d"]:
                     continue

@@ -15,14 +15,27 @@ def time_to_samples(time_str, sr):
     return int(seconds * sr)
 
 def extract_audio(audio_data, sr, start_time, end_time, out_file):
-    """Simplified audio extraction function"""
+    """Audio extraction, clamped/validated so an empty wav is never written"""
     start = time_to_samples(start_time, sr)
     end = time_to_samples(end_time, sr)
+    total_samples = len(audio_data)
+    # Clamp the requested window into the available audio range
+    start = min(max(start, 0), total_samples)
+    end = min(max(end, 0), total_samples)
+    if end <= start:
+        # Invalid/inverted window: fall back to a neighbor 1s window from start
+        rprint(f"[yellow]⚠️ Refer window {start_time} -> {end_time} for {os.path.basename(out_file)} is empty, using fallback 1s window[/yellow]")
+        start = min(start, total_samples)
+        end = min(total_samples, start + sr)
+    if end <= start:
+        # Still empty (e.g. zero-length source audio): skip instead of writing an empty file
+        rprint(f"[yellow]⚠️ Skipping empty refer extraction for {os.path.basename(out_file)}[/yellow]")
+        return
     sf.write(out_file, audio_data[start:end], sr)
 
 def extract_refer_audio_main():
     demucs_audio() #!!! in case demucs not run
-    if os.path.exists(os.path.join(_AUDIO_SEGS_DIR, '1.wav')):
+    if os.path.exists(os.path.join(_AUDIO_REFERS_DIR, '1.wav')):
         rprint(Panel("Audio segments already exist, skipping extraction", title="Info", border_style="blue"))
         return
 
