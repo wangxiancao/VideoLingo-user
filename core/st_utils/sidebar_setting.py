@@ -38,6 +38,7 @@ def page_setting():
         c1, c2 = st.columns(2)
         with c1:
             langs = {
+                "🤖 Auto": "auto",
                 "🇺🇸 English": "en",
                 "🇨🇳 简体中文": "zh",
                 "🇪🇸 Español": "es",
@@ -47,12 +48,20 @@ def page_setting():
                 "🇮🇹 Italiano": "it",
                 "🇯🇵 日本語": "ja"
             }
+            whisper_lang = load_key("whisper.language")
+            # Never let a stored code crash the selectbox: the fixed option list
+            # can't know every language. 'auto' is the default, and after a run
+            # whisper_asr writes the detected code back under 'auto' (e.g. 'ko'),
+            # which would raise ValueError in .index() below. Append any missing
+            # stored code as its own option so it stays visible and selectable.
+            if whisper_lang not in langs.values():
+                langs[whisper_lang] = whisper_lang
             lang = st.selectbox(
                 t("Recog Lang"),
                 options=list(langs.keys()),
-                index=list(langs.values()).index(load_key("whisper.language"))
+                index=list(langs.values()).index(whisper_lang)
             )
-            if langs[lang] != load_key("whisper.language"):
+            if langs[lang] != whisper_lang:
                 update_key("whisper.language", langs[lang])
                 st.rerun()
 
@@ -74,7 +83,7 @@ def page_setting():
             update_key("burn_subtitles", burn_subtitles)
             st.rerun()
     with st.expander(t("Dubbing Settings"), expanded=True):
-        tts_methods = ["custom_tts", "indextts2"]
+        tts_methods = ["custom_tts", "indextts2", "cosyvoice"]
         select_tts = st.selectbox(t("TTS Method"), options=tts_methods, index=tts_methods.index(load_key("tts_method")))
         if select_tts != load_key("tts_method"):
             update_key("tts_method", select_tts)
@@ -92,7 +101,19 @@ def page_setting():
             if selected_preset_voice != load_key("indextts2.preset_voice"):
                 update_key("indextts2.preset_voice", selected_preset_voice)
                 st.rerun()
-        
+        elif select_tts == "cosyvoice":
+            st.info(t("CosyVoice3 runs on a local vLLM-Omni server and clones preset reference voices."))
+            preset_voices = list(load_key("cosyvoice.preset_voices").keys())
+            selected_preset_voice = st.selectbox(
+                t("Preset Voice"),
+                options=preset_voices,
+                index=preset_voices.index(load_key("cosyvoice.preset_voice")),
+                key="cosyvoice_preset_voice",
+            )
+            if selected_preset_voice != load_key("cosyvoice.preset_voice"):
+                update_key("cosyvoice.preset_voice", selected_preset_voice)
+                st.rerun()
+
 def check_api():
     try:
         resp = ask_gpt("This is a test, response 'message':'success' in json format.", 

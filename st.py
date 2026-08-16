@@ -13,6 +13,10 @@ st.set_page_config(page_title="VideoLingo", page_icon="docs/logo.svg")
 SUB_VIDEO = "output/output_sub.mp4"
 DUB_VIDEO = "output/output_dub.mp4"
 
+# Session-state gate for pause_before_translate: set before stopping so the next
+# button press resumes into translation instead of restarting the whole pipeline.
+PAUSE_CONTINUE_KEY = "pause_before_translate_continue"
+
 def text_processing_section():
     st.header(t("b. Translate and Generate Subtitles"))
     with st.container(border=True):
@@ -29,9 +33,15 @@ def text_processing_section():
         """, unsafe_allow_html=True)
 
         if not os.path.exists(SUB_VIDEO):
-            if st.button(t("Start Processing Subtitles"), key="text_processing_button"):
-                process_text()
-                st.rerun()
+            if st.session_state.get(PAUSE_CONTINUE_KEY, False):
+                st.warning(t("⚠️ PAUSE_BEFORE_TRANSLATE. Go to `output/log/terminology.json` to edit terminology. Then press ENTER to continue..."))
+                if st.button("Continue Translating", key="text_processing_continue_button"):
+                    continue_translate()
+                    st.rerun()
+            else:
+                if st.button(t("Start Processing Subtitles"), key="text_processing_button"):
+                    process_text()
+                    st.rerun()
         else:
             if load_key("burn_subtitles"):
                 st.video(SUB_VIDEO)
@@ -45,20 +55,36 @@ def text_processing_section():
 def process_text():
     with st.spinner(t("Using Whisper for transcription...")):
         _2_asr.transcribe()
-    with st.spinner(t("Splitting long sentences...")):  
+    with st.spinner(t("Splitting long sentences...")):
         _3_1_split_nlp.split_by_spacy()
         _3_2_split_meaning.split_sentences_by_meaning()
     with st.spinner(t("Summarizing and translating...")):
         _4_1_summarize.get_summary()
-        if load_key("pause_before_translate"):
-            input(t("⚠️ PAUSE_BEFORE_TRANSLATE. Go to `output/log/terminology.json` to edit terminology. Then press ENTER to continue..."))
-        _4_2_translate.translate_all()
-    with st.spinner(t("Processing and aligning subtitles...")): 
-        _5_split_sub.split_for_sub_main()
-        _6_gen_sub.align_timestamp_main()
-    with st.spinner(t("Merging subtitles to video...")):
-        _7_sub_into_vid.merge_subtitles_to_video()
-    
+    if load_key("pause_before_translate") and not st.session_state.get(PAUSE_CONTINUE_KEY, False):
+        # Streamlit-native pause: never use a blocking terminal input() here.
+        # Gate on session_state so the next button press resumes translation.
+        st.session_state[PAUSE_CONTINUE_KEY] = True
+        st.warning(t("⚠️ PAUSE_BEFORE_TRANSLATE. Go to `output/log/terminology.json` to edit terminology. Then press ENTER to continue..."))
+        st.stop()
+    continue_translate()
+
+def continue_translate():
+    try:
+        with st.spinner(t("Summarizing and translating...")):
+            _4_2_translate.translate_all()
+        with st.spinner(t("Processing and aligning subtitles...")): 
+            _5_split_sub.split_for_sub_main()
+            _6_gen_sub.align_timestamp_main()
+        with st.spinner(t("Merging subtitles to video...")):
+            _7_sub_into_vid.merge_subtitles_to_video()
+    finally:
+        # Clear the pause gate on success AND on failure. Leaving it set after a
+        # failed run would keep the UI stuck on the resume screen forever; the
+        # intentional pause (st.stop() in process_text) happens before this block,
+        # so an error returns to the normal first-press state while a pause still
+        # resumes on the next "Continue Translating" press.
+        st.session_state[PAUSE_CONTINUE_KEY] = False
+
     st.success(t("Subtitle processing complete! 🎉"))
     st.balloons()
 
