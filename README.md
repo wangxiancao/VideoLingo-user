@@ -25,7 +25,7 @@ Key features:
 
 - **✅ Netflix-standard, Single-line subtitles Only**
 
-- **🗣️ Dubbing with IndexTTS2 and custom TTS**
+- **🗣️ Dubbing through a user-implementable `custom_tts` hook**
 
 - 🚀 One-click startup and processing in Streamlit
 
@@ -127,19 +127,19 @@ VideoLingo's pipeline consists of 12 numbered stages, each producing intermediat
 | 5 | `_5_split_sub.py` | Subtitle length optimization |
 | 6 | `_6_gen_sub.py` | Timestamp alignment + subtitle generation |
 | 7 | `_7_sub_into_vid.py` | Burn subtitles into video |
-| 8-12 | `_8`–`_12` | TTS dubbing pipeline (IndexTTS2 / custom TTS) |
+| 8-12 | `_8`–`_12` | TTS dubbing pipeline (`custom_tts` hook) |
 
 **ASR**: [Whisper-large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo) (809M params) via `transformers` pipeline with `return_timestamps="word"`. No external ASR packages required — just `transformers` + `torch`.
 
-**TTS**: [IndexTTS2](https://github.com/index-tts/index-tts) voice cloning (runs as separate HTTP worker) or user-implementable `custom_tts` hook.
+**TTS**: no built-in backend ships with this fork. Implement the `custom_tts` hook in `core/tts_backend/custom_tts.py` to enable dubbing.
 
 ## APIs
 VideoLingo supports OpenAI-Like API format and various TTS interfaces:
 - LLM: `claude-3-5-sonnet`, `gpt-4.1`, `deepseek-v3`, `gemini-2.0-flash`, ... (sorted by performance, be cautious with gemini-2.5-flash...)
 - ASR: **Whisper-large-v3-turbo** (local GPU, transformers pipeline with DTW word timestamps)
-- TTS: `custom-tts`, **`indextts2`**
+- TTS: `custom_tts` (bring your own)
 
-> **Note:** VideoLingo works with **[302.ai](https://gpt302.saaslink.net/C2oHR9)** for LLM API. Or run fully locally with Whisper + a local LLM + IndexTTS2 for free, no API needed!
+> **Note:** VideoLingo works with **[302.ai](https://gpt302.saaslink.net/C2oHR9)** for LLM API. Or run fully locally with Whisper + a local LLM for free, no API needed!
 
 For detailed installation, API configuration, and batch mode instructions, please refer to the documentation: [English](/docs/pages/docs/start.en-US.md) | [中文](/docs/pages/docs/start.zh-CN.md)
 

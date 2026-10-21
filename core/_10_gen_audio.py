@@ -81,14 +81,14 @@ def adjust_audio_speed(input_file: str, output_file: str, speed_factor: float) -
                 rprint(f"[red]❌ Audio speed adjustment failed, max retries reached ({max_retries})[/red]")
                 raise e
 
-def process_row(row: pd.Series, tasks_df: pd.DataFrame) -> Tuple[int, float]:
+def process_row(row: pd.Series) -> Tuple[int, float]:
     """Helper function for processing single row data"""
     number = row['number']
     lines = ast.literal_eval(row['lines']) if isinstance(row['lines'], str) else row['lines']
     real_dur = 0
     for line_index, line in enumerate(lines):
         temp_file = TEMP_FILE_TEMPLATE.format(gen_file_key(number, line_index, line))
-        tts_main(line, temp_file, number, tasks_df)
+        tts_main(line, temp_file)
         real_dur += get_audio_duration(temp_file)
     return number, real_dur
 
@@ -104,28 +104,20 @@ def generate_tts_audio(tasks_df: pd.DataFrame) -> pd.DataFrame:
         warmup_size = min(WARMUP_SIZE, len(tasks_df))
         for _, row in tasks_df.head(warmup_size).iterrows():
             try:
-                number, real_dur = process_row(row, tasks_df)
+                number, real_dur = process_row(row)
                 tasks_df.loc[tasks_df['number'] == number, 'real_dur'] = real_dur
                 progress.advance(task)
             except Exception as e:
                 rprint(f"[red]❌ Error in warmup: {str(e)}[/red]")
                 raise e
         
-        tts_method = load_key("tts_method")
-        if tts_method == "indextts2":
-            from core.tts_backend.indextts2_tts import request_concurrency
-            max_workers = request_concurrency()
-        elif tts_method == "cosyvoice":
-            from core.tts_backend.cosyvoice_tts import request_concurrency
-            max_workers = request_concurrency()
-        else:
-            max_workers = load_key("max_workers")
+        max_workers = load_key("max_workers")
         # parallel processing for remaining tasks
         if len(tasks_df) > warmup_size:
             remaining_tasks = tasks_df.iloc[warmup_size:].copy()
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = [
-                    executor.submit(process_row, row, tasks_df.copy())
+                    executor.submit(process_row, row)
                     for _, row in remaining_tasks.iterrows()
                 ]
                 

@@ -63,45 +63,8 @@ reflect_translate: true
 pause_before_translate: false
 
 ## ======================== Dubbing Settings ======================== ##
-# TTS selection: "custom_tts", "indextts2", and "cosyvoice" are supported
-tts_method: 'indextts2'
-
-# IndexTTS2 served by vLLM-Omni in the existing IndexTTS uv environment
-indextts2:
-  repo_dir: 'external/index-tts'
-  host: '127.0.0.1'
-  port: 18721
-  model: 'external/index-tts/checkpoints'
-  vllm_omni_python: 'external/index-tts/.venv/bin/python'
-  auto_start: true
-  max_concurrency: 4
-  api_key: 'sk-empty'
-  preset_voice: 'female'
-  preset_voices:
-    female: 'external/index-tts/examples/voice_09.wav'
-    male: 'external/index-tts/examples/voice_01.wav'
-  vllm_omni_startup_timeout: 600
-  request_timeout: 300
-
-# CosyVoice3 served by vLLM-Omni (local, Apache-2.0, zero-shot cloning)
-cosyvoice:
-  model: '_model_cache/cosyvoice3'
-  host: '127.0.0.1'
-  port: 18722
-  vllm_omni_python: 'external/index-tts/.venv/bin/python'
-  auto_start: true
-  max_concurrency: 4
-  api_key: 'sk-empty'
-  preset_voice: 'female'
-  preset_voices:
-    female:
-      audio: 'assets/cosyvoice/female.wav'
-      ref_text: '你好，欢迎使用视频翻译配音系统，今天也要元气满满哦。'
-    male:
-      audio: 'assets/cosyvoice/male.wav'
-      ref_text: '大家好，这里是科技杂谈频道，我们下期再见。'
-  vllm_omni_startup_timeout: 600
-  request_timeout: 300
+# Only the user-implemented custom_tts hook is supported
+tts_method: 'custom_tts'
 
 # *Audio speed range
 speed_factor:

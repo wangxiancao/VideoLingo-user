@@ -48,7 +48,7 @@ The following outlines the core technical modules and workflows:
 
 *   `core/_8_1_audio_task.py`: Parses the SRT file, merges short subtitles, cleans the text, trims text based on estimated duration using an LLM, and generates an Excel file (`_8_1_AUDIO_TASK.xlsx`) defining the tasks for the TTS engine. Leverages prompts defined in `core/prompts.py`.
 *   `core/_8_2_dub_chunks.py`: Analyzes the audio task file, calculates time gaps and speaking rates, determines optimal cut points for dubbing chunks based on speed and pauses, merges lines where necessary, matches subtitles, and updates the task file.
-*   `core/_9_refer_audio.py`: Extracts specific audio segments from the source vocal track based on timestamps defined in the audio task file, creating reference audio files used by certain TTS engines (e.g., IndexTTS2).
+*   `core/_9_refer_audio.py`: Extracts specific audio segments from the source vocal track based on timestamps defined in the audio task file, creating reference audio files used by certain TTS engines (e.g., a `custom_tts` implementation).
 *   **TTS Backends (`core/tts_backend`):**
     *   `core/tts_backend/custom_tts.py`: Placeholder/template for integrating custom TTS engines.
     *   `core/tts_backend/estimate_duration.py`: Provides functions to estimate the speaking duration of text based on syllable counts and punctuation pauses for a given language. Used for audio task generation and subtitle trimming.

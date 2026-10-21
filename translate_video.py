@@ -9,13 +9,6 @@ Usage:
 
     # Subtitles + dubbing (TTS method set as tts_method in config.yaml)
     python translate_video.py --mode tts https://www.youtube.com/watch?v=xxx
-
-    IndexTTS2 runs behind one vLLM-Omni OpenAI-compatible server. Stage 10
-    sends concurrent requests to that server:
-      --tts-concurrency N writes indextts2.max_concurrency to config.yaml.
-
-    Examples:
-    python translate_video.py --mode tts --tts-concurrency 4 /path/to/video.mp4
 """
 
 import argparse
@@ -110,55 +103,7 @@ def parse_args():
         default="no-tts",
         help="no-tts translates subtitles only; tts translates first, then generates dubbing.",
     )
-    parser.add_argument(
-        "--tts-concurrency",
-        type=int,
-        default=None,
-        help=(
-            "Maximum concurrent IndexTTS2 requests sent to the vLLM-Omni server. "
-            "Writes indextts2.max_concurrency to config.yaml."
-        ),
-    )
-    parser.add_argument(
-        "--tts-workers",
-        dest="legacy_tts_workers",
-        type=int,
-        default=None,
-        help=argparse.SUPPRESS,
-    )
     return parser.parse_args()
-
-
-def apply_tts_concurrency_override(n):
-    """Persist the vLLM-Omni request concurrency for downstream stage 10."""
-    from core.utils.config_utils import load_key, CONFIG_PATH, lock, yaml
-
-    if n is None:
-        return
-
-    if load_key("tts_method") != "indextts2":
-        console.print(
-            "[yellow]--tts-concurrency ignored (tts_method is not 'indextts2')[/]"
-        )
-        return
-
-    if n < 1:
-        raise ValueError(f"--tts-concurrency must be >= 1, got {n}")
-
-    # update_key cannot add a missing key, so support older local configs by
-    # adding max_concurrency directly under the existing indextts2 mapping.
-    with lock:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            data = yaml.load(f)
-        data["indextts2"]["max_concurrency"] = n
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            yaml.dump(data, f)
-
-    console.print(Panel(
-        f"[bold green]Configured vLLM-Omni IndexTTS2 concurrency[/]\n"
-        f"  max_concurrency: {n}",
-        border_style="green",
-    ))
 
 
 def run_steps(steps):
@@ -183,27 +128,6 @@ def run_steps(steps):
                     f"[yellow]Attempt {attempt + 1} failed, retrying...[/]",
                     border_style="yellow",
                 ))
-
-
-def stop_optional_tts_server():
-    try:
-        from core.tts_backend.indextts2_tts import stop_indextts2_worker
-
-        stop_indextts2_worker()
-    except Exception as e:
-        console.print(Panel(
-            f"[yellow]Warning: failed to stop optional TTS worker[/]\n{e}",
-            border_style="yellow",
-        ))
-    try:
-        from core.tts_backend.cosyvoice_tts import stop_cosyvoice_server
-
-        stop_cosyvoice_server()
-    except Exception as e:
-        console.print(Panel(
-            f"[yellow]Warning: failed to stop optional CosyVoice3 server[/]\n{e}",
-            border_style="yellow",
-        ))
 
 
 def check_api():
@@ -261,17 +185,6 @@ def main():
     file = args.video_path_or_url
 
     try:
-        concurrency = (
-            args.tts_concurrency
-            if args.tts_concurrency is not None
-            else args.legacy_tts_workers
-        )
-        if args.legacy_tts_workers is not None:
-            console.print(
-                "[yellow]--tts-workers is deprecated; use --tts-concurrency.[/]"
-            )
-        apply_tts_concurrency_override(concurrency)
-
         console.print(Panel("[bold]Checking API connectivity...[/]", border_style="blue"))
         error, hint = check_api()
         if error:
@@ -313,8 +226,6 @@ def main():
     except Exception as e:
         console.print(Panel(f"[bold red]Pipeline failed[/]\n{e}", border_style="red"))
         sys.exit(1)
-    finally:
-        stop_optional_tts_server()
 
 
 if __name__ == "__main__":

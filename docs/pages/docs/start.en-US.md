@@ -1,7 +1,7 @@
 # 🚀 Getting Started
 
 ## 📋 API Configuration
-VideoLingo requires an LLM and TTS (optional). For the best quality, use claude-3-5-sonnet-20240620. For dubbing, indextts2 provides high-quality voice cloning locally on GPU, while custom_tts offers a user-implementable hook for any TTS service.
+VideoLingo requires an LLM and TTS (optional). For the best quality, use claude-3-5-sonnet-20240620. For dubbing, custom_tts offers a user-implementable hook for any TTS service; this fork ships no built-in TTS backend.
 
 ### 1. **Get API_KEY for LLM**:
 
@@ -16,9 +16,8 @@ VideoLingo requires an LLM and TTS (optional). For the best quality, use claude-
 Note: Supports OpenAI format, you can try different models at your risk. However, the process involves multi-step reasoning chains and complex JSON formats, **not recommended to use models smaller than 30B**.
 
 ### 2. **TTS API**
-VideoLingo provides two dubbing backends (skip if only using translation without dubbing):
+VideoLingo ships no built-in dubbing backend (skip if only using translation without dubbing):
 
-- **indextts2** (default): Local GPU-based voice cloning with preset reference voices.
 - **custom_tts**: User-implementable hook for integrating any TTS service. See `core/tts_backend/custom_tts.py`.
 
 ## 🛠️ Quick Start

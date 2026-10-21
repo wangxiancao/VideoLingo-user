@@ -3,9 +3,7 @@ import re
 from pydub import AudioSegment
 
 from core.asr_backend.audio_preprocess import get_audio_duration
-from core.tts_backend.cosyvoice_tts import cosyvoice_tts
 from core.tts_backend.custom_tts import custom_tts
-from core.tts_backend.indextts2_tts import indextts2_tts
 from core.prompts import get_correct_text_prompt
 from core.utils import *
 
@@ -32,7 +30,7 @@ def _read_srctext_sidecar(sidecar_file):
     except OSError:
         return None
 
-def tts_main(text, save_as, number, task_df):
+def tts_main(text, save_as):
     text = clean_text_for_tts(text)
     # Sidecar records which text was ACTUALLY synthesized (possibly GPT-corrected).
     # The temp path is content-addressed on the ORIGINAL text, so an existing
@@ -57,7 +55,11 @@ def tts_main(text, save_as, number, task_df):
         return
     
     print(f"Generating <{text}...>")
-    TTS_METHOD = load_key("tts_method")
+    tts_method = load_key("tts_method")
+    if tts_method != 'custom_tts':
+        raise ValueError(
+            f"Unsupported tts_method: {tts_method!r}; only 'custom_tts' is available."
+        )
     
     max_retries = 3
     for attempt in range(max_retries):
@@ -70,12 +72,7 @@ def tts_main(text, save_as, number, task_df):
                 if 'text' not in correct_text or not str(correct_text.get('text', '')).strip():
                     raise ValueError(f"GPT text correction returned an invalid result for: {text}")
                 text = correct_text['text']
-            if TTS_METHOD == 'custom_tts':
-                custom_tts(text, save_as)
-            elif TTS_METHOD == 'indextts2':
-                indextts2_tts(text, save_as, number, task_df)
-            elif TTS_METHOD == 'cosyvoice':
-                cosyvoice_tts(text, save_as, number, task_df)
+            custom_tts(text, save_as)
                 
             # Check generated audio duration: anything below 0.2s is treated as
             # a failed synthesis (retry, then raise), never as a success.

@@ -1,4 +1,0 @@
-[submodule "external/index-tts"]
-	path = external/index-tts
-	url = https://github.com/index-tts/index-tts.git
-	ignore = untracked
