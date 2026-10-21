@@ -29,7 +29,7 @@ def create_backend(config):
         config.get("asr.chunk_seconds", 30), "asr.chunk_seconds", float
     )
     batch_size = _positive_number(
-        config.get("asr.batch_size", 1), "asr.batch_size", int
+        config.get("asr.batch_size", 20), "asr.batch_size", int
     )
     max_new_tokens = _positive_number(
         config.get("asr.max_new_tokens", 512), "asr.max_new_tokens", int

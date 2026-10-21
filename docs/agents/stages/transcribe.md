@@ -32,7 +32,7 @@
     backend: 'glm_asr'          # 仅支持 glm_asr，未知值显式失败
     language: 'auto'            # auto 或 zh/en/yue/fr/de/it/ja/ko/pt/ru/es
     chunk_seconds: 30
-    batch_size: 1
+    batch_size: 20              # T2b 默认；24 GB 显存下最优，OOM 时自动减半
     max_new_tokens: 512
     modelscope_cache: '~/.cache/modelscope'
   ```
@@ -140,6 +140,7 @@ $PYTHON -m pipeline.runner --stages transcribe --workdir "$NOMEDIA" --config "$N
 | 缺音频 | 无 transcript | 2 | `stage 'transcribe' requires 'audio' ... (produced by 'ingest')` |
 
 - 测试：`52 passed`（T1 29 + T2a 6 + T3 4 + T4 13）。
+- 上表 30/60 s 数据采集于 T4 的 batch=1；T2b 将默认批量改为 20 并加入 OOM 减半，阶段契约不变，性能见 `docs/agents/rtfx-optimization.md`。
 - 性能基线仍引用 T2a 报告：30 s 热启动 RTFx 17.32、60 s 16.54、显存峰值 6062/6228 MB、batch 1；T4 不重新调优。
 - 未跑全流程。
 

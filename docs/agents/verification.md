@@ -145,7 +145,7 @@ $PYTHON -m pipeline.runner --stages ingest --workdir "$WORK" --config "$WORK/con
 | translate | 源文/译文结构完整；时间戳不变；两步流程可复现；失败显式报错。 |
 | subtitle | 三份 SRT 均生成；编号/顺序/时间戳正确；显示长度约束成立。 |
 | burn | MP4 存在；时长/流正确；CJK 字体渲染正常；失败不输出黑色占位视频。 |
-| 性能（T2a/T2b） | 30s/1min/10min 的冷/热 RTFx、显存、批量；独立复跑；不改变阶段契约。T2a 报告：`docs/agents/rtfx-baseline.md`。 |
+| 性能（T2a/T2b） | 30s/1min/10min 的冷/热 RTFx、显存、批量；独立复跑；不改变阶段契约。T2a 报告：`docs/agents/rtfx-baseline.md`；T2b 报告：`docs/agents/rtfx-optimization.md`。 |
 | 人类门（T2c/T9） | 决策记录、真实样本产物、人工确认；只跑一次全流程。 |
 
 ## 阶段验证文档骨架
