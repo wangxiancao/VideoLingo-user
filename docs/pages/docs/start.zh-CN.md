@@ -1,7 +1,7 @@
 # 🚀 开始使用
 
 ## 📋 API 配置指南
-本项目需使用大模型和 TTS（可选）。追求最佳效果请使用 claude-3-5-sonnet-20240620。配音方面，indextts2 可在本地 GPU 上提供高质量语音克隆，而 custom_tts 提供了用户可自行实现 TTS 的接口。
+本项目需使用大模型和 TTS（可选）。追求最佳效果请使用 claude-3-5-sonnet-20240620。配音方面，custom_tts 提供了用户可自行实现 TTS 的接口；本 fork 不再内置任何 TTS 后端。
 
 ### 1. **大模型的 API_KEY**：
 
@@ -16,9 +16,8 @@
 注：支持 OpenAI 格式接口，可自行尝试不同模型。但处理过程涉及多步思维链和复杂的json格式，**不建议使用小于 30B 的模型**。
 
 ### 2. **TTS 的 API**
-VideoLingo 提供两种配音后端（如不使用配音可跳过）：
+VideoLingo 不再内置配音后端（如不使用配音可跳过）：
 
-- **indextts2**（默认）：本地 GPU 语音克隆，使用预设参考音色。
 - **custom_tts**：用户可自行实现 TTS 服务的接口。参见 `core/tts_backend/custom_tts.py`。
 
 ## 🛠️ 快速上手

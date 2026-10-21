@@ -17,7 +17,7 @@ Key features:
 
 - **✅ Netflix-standard single-line subtitles only**
 
-- **🗣️ Dubbing alignment with IndexTTS2 and custom TTS**
+- **🗣️ Dubbing alignment through a custom TTS hook**
 
 - 🚀 One-click startup and output in Streamlit
 
@@ -79,7 +79,7 @@ docker run -d -p 8501:8501 --gpus all videolingo
 ## API
 The project supports OpenAI-Like API format and various dubbing interfaces:
 - `claude-3-5-sonnet-20240620`, `gpt-4.1`, `deepseek-v3`, ... (sorted by performance)
-- `custom_tts`, `indextts2`
+- `custom_tts`
 
 For detailed installation, API configuration, and batch mode instructions, please refer to the documentation: [English](/docs/pages/docs/start.en-US.md) | [中文](/docs/pages/docs/start.zh-CN.md)
 

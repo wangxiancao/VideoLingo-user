@@ -82,37 +82,6 @@ def page_setting():
         if burn_subtitles != load_key("burn_subtitles"):
             update_key("burn_subtitles", burn_subtitles)
             st.rerun()
-    with st.expander(t("Dubbing Settings"), expanded=True):
-        tts_methods = ["custom_tts", "indextts2", "cosyvoice"]
-        select_tts = st.selectbox(t("TTS Method"), options=tts_methods, index=tts_methods.index(load_key("tts_method")))
-        if select_tts != load_key("tts_method"):
-            update_key("tts_method", select_tts)
-            st.rerun()
-
-        # sub settings for each tts method
-        if select_tts == "indextts2":
-            st.info(t("IndexTTS2 runs as a local worker and uses preset reference voices."))
-            preset_voices = list(load_key("indextts2.preset_voices").keys())
-            selected_preset_voice = st.selectbox(
-                t("Preset Voice"),
-                options=preset_voices,
-                index=preset_voices.index(load_key("indextts2.preset_voice")),
-            )
-            if selected_preset_voice != load_key("indextts2.preset_voice"):
-                update_key("indextts2.preset_voice", selected_preset_voice)
-                st.rerun()
-        elif select_tts == "cosyvoice":
-            st.info(t("CosyVoice3 runs on a local vLLM-Omni server and clones preset reference voices."))
-            preset_voices = list(load_key("cosyvoice.preset_voices").keys())
-            selected_preset_voice = st.selectbox(
-                t("Preset Voice"),
-                options=preset_voices,
-                index=preset_voices.index(load_key("cosyvoice.preset_voice")),
-                key="cosyvoice_preset_voice",
-            )
-            if selected_preset_voice != load_key("cosyvoice.preset_voice"):
-                update_key("cosyvoice.preset_voice", selected_preset_voice)
-                st.rerun()
 
 def check_api():
     try:

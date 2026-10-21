@@ -48,7 +48,7 @@ Videolingo 是一个高度集成的视频翻译系统，能够自动执行一系
 
 *   `core/_8_1_audio_task.py`: 解析 SRT 文件，合并短字幕，清理文本，使用 LLM 根据估计的时长修剪文本，并生成一个 Excel 文件 (`_8_1_AUDIO_TASK.xlsx`)，用于定义 TTS 引擎的任务。利用 `core/prompts.py` 中定义的提示。
 *   `core/_8_2_dub_chunks.py`: 分析音频任务文件，计算时间间隙和语速，根据速度和停顿确定配音块的最佳切断点，必要时合并行，匹配字幕，并更新任务文件。
-*   `core/_9_refer_audio.py`: 基于音频任务文件中定义的时间戳，从源人声音轨中提取特定的音频片段，创建某些 TTS 引擎（如 IndexTTS2）使用的参考音频文件。
+*   `core/_9_refer_audio.py`: 基于音频任务文件中定义的时间戳，从源人声音轨中提取特定的音频片段，创建某些 TTS 引擎（如自行实现的 `custom_tts`）使用的参考音频文件。
 *   **TTS 后端 (`core/tts_backend`):**
     *   `core/tts_backend/custom_tts.py`: 用于集成自定义 TTS 引擎的占位符/模板。
     *   `core/tts_backend/estimate_duration.py`: 提供根据特定语言的音节计数和标点符号停顿来估计文本的说话时长的函数。用于音频任务生成和字幕修剪。
