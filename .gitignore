@@ -67,7 +67,9 @@ instance/
 .scrapy
 
 # Sphinx documentation
-docs/
+# `docs/*` (not `docs/`) so the negation can re-include docs/agents/.
+docs/*
+!docs/agents/
 
 # PyBuilder
 .pybuilder/
@@ -175,7 +177,6 @@ dev/
 installer_files/
 # Claude Code
 CLAUDE.md
-AGENTS.md
 
 # OpenCode session data
 .omo/
