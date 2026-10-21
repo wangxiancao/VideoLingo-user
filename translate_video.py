@@ -9,6 +9,20 @@ Usage:
 
     # Subtitles + dubbing (TTS method set as tts_method in config.yaml)
     python translate_video.py --mode tts https://www.youtube.com/watch?v=xxx
+
+    Proxy note:
+    Whisper loading (huggingface_hub) and the API both go through httpx, which
+    validates every proxy env var eagerly. Two common Clash-related failures:
+    1. ALL_PROXY=socks://127.0.0.1:7897 uses the invalid bare 'socks://' scheme
+       (httpx only accepts socks5:// / socks5h://, and those need the 'socksio'
+       extra), so it aborts model loading with "Unknown scheme for proxy URL".
+    2. The proxy port is configured but the proxy app is not running, so every
+       request burns a connect timeout (or hard-fails where there is no cache
+       fallback).
+    This script auto-neutralizes unusable/dead proxy variables INSIDE ITS OWN
+    PROCESS ONLY and falls back to a direct connection. Your shell or global
+    environment is never modified, so other tools keep using the proxy vars as
+    before. No extra flag is needed; it just works.
 """
 
 import argparse
@@ -45,6 +59,83 @@ from rich.panel import Panel
 from rich.console import Console
 
 console = Console()
+
+
+def _sanitize_proxy_env():
+    """Make this run immune to unusable proxy variables in the environment.
+
+    huggingface_hub>=1.x (Whisper download/load) uses httpx, which validates
+    EVERY proxy env var eagerly when a Client is built. Two failure modes:
+
+    1. Bad scheme: a common Clash setup exports ``ALL_PROXY=socks://127.0.0.1``
+       — the bare ``socks://`` scheme is invalid (httpx only accepts
+       ``socks5://`` / ``socks5h://``, and even those need the optional
+       'socksio' extra). httpx raises ``ValueError: Unknown scheme for proxy
+       URL`` before a single request is sent, which surfaces here as "Whisper
+       failed to load" even when the model is already fully cached.
+    2. Dead proxy: the proxy variables point at a local proxy app (e.g. Clash)
+       that is not running. Requests then burn connect timeouts and fail
+       outright in code paths that have no cache fallback.
+
+    We deliberately do NOT touch the user's shell or global config. We only
+    drop unusable/dead proxy variables inside THIS process; direct connections
+    (and the explicit ``proxy=None`` used for the LLM API) keep working.
+    """
+    try:
+        import socksio  # noqa: F401
+        socks_usable = True
+    except Exception:
+        socks_usable = False
+
+    for var in ("ALL_PROXY", "all_proxy"):
+        val = os.environ.get(var)
+        if not val or "://" not in val:
+            continue
+        scheme = val.split("://", 1)[0].lower()
+        if scheme.startswith("socks") and not socks_usable:
+            os.environ.pop(var, None)
+            console.print(
+                f"[yellow][proxy-fix] Ignoring {var}={val} for this run only: httpx "
+                f"cannot use a SOCKS proxy without the 'socksio' package, so it would "
+                f"abort Whisper/API loading. Falling back to http_proxy/https_proxy. "
+                f"Your shell environment is unchanged.[/]"
+            )
+
+    # Drop proxy variables whose server does not accept TCP connections
+    # (proxy app not running). One probe per unique address, short timeout.
+    import socket
+    from urllib.parse import urlparse
+
+    proxy_vars = ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+                  "ALL_PROXY", "all_proxy")
+
+    def _proxy_reachable(value):
+        try:
+            url = value if "://" in value else f"http://{value}"
+            parsed = urlparse(url)
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            with socket.create_connection((parsed.hostname, port), timeout=1.5):
+                return True
+        except Exception:
+            return False
+
+    liveness = {}
+    for var in proxy_vars:
+        val = os.environ.get(var)
+        if not val:
+            continue
+        if val not in liveness:
+            liveness[val] = _proxy_reachable(val)
+        if not liveness[val]:
+            os.environ.pop(var, None)
+            console.print(
+                f"[yellow][proxy-fix] Ignoring {var}={val} for this run only: the "
+                f"proxy server is unreachable (is the proxy app running?). Requests "
+                f"will use a direct connection. Your shell environment is unchanged.[/]"
+            )
+
+
+_sanitize_proxy_env()
 
 
 def prepare_output_folder(output_folder="output"):
@@ -130,67 +221,11 @@ def run_steps(steps):
                 ))
 
 
-def check_api():
-    from core.utils.config_utils import load_key
-    from openai import OpenAI
-    import httpx
-
-    api_key = load_key("api.key")
-    base_url = load_key("api.base_url")
-    model = load_key("api.model")
-
-    if not api_key:
-        return "api.key is not set", "请在 config.yaml 中设置 api.key，例如:\n  api:\n    key: 'sk-your-api-key'"
-
-    if not base_url:
-        return "api.base_url is not set", "请在 config.yaml 中设置 api.base_url，例如:\n  api:\n    base_url: 'https://api.deepseek.com'"
-
-    if not model:
-        return "api.model is not set", "请在 config.yaml 中设置 api.model，例如:\n  api:\n    model: 'deepseek-chat'"
-
-    resolved_url = base_url
-    if 'ark' in resolved_url:
-        resolved_url = "https://ark.cn-beijing.volces.com/api/v3"
-    elif 'v1' not in resolved_url:
-        resolved_url = resolved_url.strip('/') + '/v1'
-
-    # Bypass SOCKS proxy (httpx doesn't support socks:// without socksio)
-    http_client = httpx.Client(proxy=None, transport=httpx.HTTPTransport())
-    kwargs = dict(api_key=api_key, base_url=resolved_url, http_client=http_client)
-
-    try:
-        client = OpenAI(**kwargs)
-        client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=1,
-        )
-        return None, None
-    except Exception as e:
-        error_msg = str(e)
-        hint = f"API connection failed: {error_msg}\n\n请检查 config.yaml 中的 API 配置:\n"
-        if "401" in error_msg or "authentication" in error_msg.lower():
-            hint += "  - api.key 可能无效，请确认密钥是否正确"
-        elif "404" in error_msg or "model" in error_msg.lower():
-            hint += f"  - api.model '{model}' 可能不可用，请确认模型名称是否正确"
-        elif "connection" in error_msg.lower() or "timeout" in error_msg.lower():
-            hint += f"  - api.base_url '{base_url}' 无法连接，请检查网络或 URL 是否正确"
-        else:
-            hint += f"  - api.base_url: {base_url}\n  - api.model: {model}\n  - api.key: {api_key[:8]}..."
-        return error_msg, hint
-
-
 def main():
     args = parse_args()
     file = args.video_path_or_url
 
     try:
-        console.print(Panel("[bold]Checking API connectivity...[/]", border_style="blue"))
-        error, hint = check_api()
-        if error:
-            raise RuntimeError(f"API check failed\n{hint}")
-        console.print("[green]API connection OK[/]")
-
         from core.utils.onekeycleanup import cleanup
         from core import _2_asr, _7_sub_into_vid
 
