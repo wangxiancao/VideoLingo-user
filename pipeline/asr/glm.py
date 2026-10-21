@@ -133,9 +133,33 @@ def _chunks(samples, sample_rate, chunk_seconds):
     return chunks
 
 
-def _batches(items, batch_size):
-    for index in range(0, len(items), batch_size):
-        yield items[index : index + batch_size]
+def _batched_results(items, batch_size, function, label):
+    import torch
+
+    results = []
+    index = 0
+    current = batch_size
+    while index < len(items):
+        batch = items[index : index + current]
+        try:
+            output = function(batch)
+        except RuntimeError as exc:
+            if "out of memory" not in str(exc).lower():
+                raise
+            torch.cuda.empty_cache()
+            if current == 1:
+                raise StageError(
+                    f"CUDA out of memory during {label} at batch size 1"
+                ) from exc
+            current = max(1, current // 2)
+            print(
+                f"transcribe: CUDA OOM during {label}; retrying batch size {current}",
+                file=sys.stderr,
+            )
+            continue
+        results.extend(output)
+        index += len(batch)
+    return results
 
 
 def _transcribe_batch(models, audio_arrays, max_new_tokens):
@@ -241,9 +265,12 @@ class GlmAsrBackend:
         paths = _resolve_models(self.cache_dir)
         models = _load_models(paths)
 
-        texts = []
-        for batch in _batches(chunks, self.batch_size):
-            texts.extend(_transcribe_batch(models, batch, self.max_new_tokens))
+        texts = _batched_results(
+            chunks,
+            self.batch_size,
+            lambda batch: _transcribe_batch(models, batch, self.max_new_tokens),
+            "ASR",
+        )
         if len(texts) != len(chunks):
             raise StageError("GLM-ASR returned a mismatched number of transcripts")
 
@@ -260,24 +287,26 @@ class GlmAsrBackend:
         language_code = configured_language or resolve_language(None, [text for _, text in spoken])
         aligner_language_name = aligner_language(language_code)
 
-        segments = []
-        for batch in _batches(spoken, self.batch_size):
+        def align_batch(batch):
             indices = [index for index, _ in batch]
             batch_texts = [text for _, text in batch]
             arrays = [chunks[index] for index in indices]
-            aligned = _align_batch(models, arrays, batch_texts, aligner_language_name)
-            for index, text, timestamps in zip(indices, batch_texts, aligned):
-                offset = index * (int(round(sample_rate * self.chunk_seconds)) / sample_rate)
-                chunk_duration = len(chunks[index]) / sample_rate
-                words = _clamp_words(timestamps, offset, chunk_duration)
-                segments.append(
-                    TranscriptSegment(
-                        start=words[0].start,
-                        end=words[-1].end,
-                        text=text,
-                        words=tuple(words),
-                    )
+            return _align_batch(models, arrays, batch_texts, aligner_language_name)
+
+        aligned = _batched_results(spoken, self.batch_size, align_batch, "alignment")
+        segments = []
+        for (index, text), timestamps in zip(spoken, aligned):
+            offset = index * (int(round(sample_rate * self.chunk_seconds)) / sample_rate)
+            chunk_duration = len(chunks[index]) / sample_rate
+            words = _clamp_words(timestamps, offset, chunk_duration)
+            segments.append(
+                TranscriptSegment(
+                    start=words[0].start,
+                    end=words[-1].end,
+                    text=text,
+                    words=tuple(words),
                 )
+            )
 
         last_end = 0.0
         for segment in segments:
@@ -290,9 +319,10 @@ class GlmAsrBackend:
             )
 
         print(
-            f"transcribe: {len(segments)} segments, "
-            f"{sum(len(segment.words) for segment in segments)} words, "
-            f"{time.perf_counter() - started:.2f}s",
+            f"transcribe: chunks={len(chunks)} chunk_seconds={self.chunk_seconds:g} "
+            f"batch_size={self.batch_size} segments={len(segments)} "
+            f"words={sum(len(segment.words) for segment in segments)} "
+            f"time={time.perf_counter() - started:.2f}s",
             file=sys.stderr,
         )
         return Transcription(language=language_code, segments=tuple(segments))

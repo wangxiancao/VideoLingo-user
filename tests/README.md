@@ -8,12 +8,15 @@ T3 adds `tests/test_t3_ingest.py` (4 tests). It runs ingest through the stage ru
 
 T4 adds `tests/test_t4_transcribe.py` (13 tests). It uses a fake ASR backend for stage orchestration, language detection and failure paths, plus the transcript audio-duration validator; the real model is verified separately.
 
-Run all four from the repo root with the existing dev venv:
+T2b adds `tests/test_t2b_batching.py` (2 tests). It checks the default batch size and the CUDA-OOM halving path with a fake batch function.
+
+Run all from the repo root with the existing dev venv:
 
 ```bash
 /root/VideoLingo/.venv/bin/python -m pytest -q \
   tests/test_t1_runner.py tests/test_t2a_rtfx.py \
   tests/test_t3_ingest.py tests/test_t4_transcribe.py \
+  tests/test_t2b_batching.py \
   -p no:cacheprovider
 ```
 

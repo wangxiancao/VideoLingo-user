@@ -38,8 +38,9 @@ asr:
   language: 'auto'
   # Audio chunk length in seconds; ForcedAligner accepts chunks well under 5 minutes
   chunk_seconds: 30
-  # Chunks per ASR/alignment batch; T2b tunes this
-  batch_size: 1
+  # Chunks per ASR/alignment batch; 20 fits 24 GB and gives the best throughput
+  # The stage halves the batch automatically on CUDA OOM
+  batch_size: 20
   max_new_tokens: 512
   # ModelScope cache containing both models; weights stay outside the repository
   modelscope_cache: '~/.cache/modelscope'
