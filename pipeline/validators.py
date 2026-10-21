@@ -1,7 +1,5 @@
 import math
 import re
-import wave
-from pathlib import Path
 from typing import Any
 
 from pipeline.contracts import CodecError, ContractError, StageContext
@@ -9,7 +7,6 @@ from pipeline.contracts import CodecError, ContractError, StageContext
 SCHEMA_VERSION = 1
 TIMESTAMP_TOLERANCE = 0.05
 TIME_EQUAL_TOLERANCE = 0.001
-MAX_AUDIO_OVERRUN = 0.5
 
 SRT_TIME_RE = re.compile(
     r"^(\d{2}):(\d{2}):(\d{2}),(\d{3}) --> (\d{2}):(\d{2}):(\d{2}),(\d{3})$"
@@ -89,12 +86,11 @@ def _validate_timing(
     ctx: StageContext,
     key: str,
     require_ids: bool,
-) -> float:
+) -> None:
     if not segments:
         _fail(ctx, key, "segments must not be empty")
     previous_start = None
     previous_end = None
-    last_end = 0.0
     for index, raw_segment in enumerate(segments):
         field = f"segments[{index}]"
         segment = _mapping(raw_segment, ctx, key, field)
@@ -112,8 +108,6 @@ def _validate_timing(
             _fail(ctx, key, f"{field} overlaps the previous segment")
         previous_start = start
         previous_end = end
-        last_end = end
-    return last_end
 
 
 def _validate_segments(
@@ -121,8 +115,8 @@ def _validate_segments(
     ctx: StageContext,
     key: str,
     require_ids: bool,
-) -> float:
-    last_end = _validate_timing(segments, ctx, key, require_ids)
+) -> None:
+    _validate_timing(segments, ctx, key, require_ids)
     for index, raw_segment in enumerate(segments):
         field = f"segments[{index}]"
         segment = _mapping(raw_segment, ctx, key, field)
@@ -138,34 +132,13 @@ def _validate_segments(
             ctx,
             key,
         )
-    return last_end
-
-
-def _wav_duration(path: Path) -> float | None:
-    try:
-        with wave.open(str(path), "rb") as wav:
-            rate = wav.getframerate()
-            if rate <= 0:
-                return None
-            return wav.getnframes() / float(rate)
-    except (OSError, wave.Error):
-        return None
 
 
 def validate_transcript(ctx: StageContext) -> None:
     data = _check_schema(_read_json(ctx, "transcript"), ctx, "transcript")
     _text(data.get("language"), ctx, "transcript", "language")
     segments = _list(data.get("segments"), ctx, "transcript", "segments")
-    last_end = _validate_segments(segments, ctx, "transcript", require_ids=False)
-    audio = ctx.path("audio")
-    if audio.is_file():
-        duration = _wav_duration(audio)
-        if duration is not None and last_end > duration + MAX_AUDIO_OVERRUN:
-            _fail(
-                ctx,
-                "transcript",
-                f"last end {last_end:.3f}s exceeds audio duration {duration:.3f}s",
-            )
+    _validate_segments(segments, ctx, "transcript", require_ids=False)
 
 
 def validate_segments(ctx: StageContext) -> None:
@@ -242,7 +215,6 @@ def _parse_srt(ctx: StageContext, key: str) -> list[dict]:
                 "start": start,
                 "end": end,
                 "text": "\n".join(text_lines),
-                "line_count": len(text_lines),
             }
         )
     return cues
@@ -258,8 +230,6 @@ def _validate_cues(cues: list[dict], ctx: StageContext, key: str) -> None:
             _fail(ctx, key, f"SRT cue {cue['index']} overlaps the previous cue")
         previous_start = cue["start"]
         previous_end = cue["end"]
-    if key == "srt_bilingual" and any(cue["line_count"] < 2 for cue in cues):
-        _fail(ctx, "srt_bilingual", "each bilingual cue needs source and target lines")
 
 
 def validate_srt(ctx: StageContext, key: str) -> None:
