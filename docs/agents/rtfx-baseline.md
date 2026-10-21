@@ -67,7 +67,7 @@
 - `chunk_seconds = 30`，`batch_size = 1`，`language = Chinese`，`max_new_tokens = 512`。
 - 每个 30 秒块先整块转写，再整块做强制对齐；对齐时间戳必须非空、单调、在该块时长 + 0.5 秒内，否则基准失败。
 - **冷启动 RTFx** = 音频时长 / (模型加载 + 一次完整推理)。包含模型加载时间，不含 Python 导入与应用启动。
-- **热启动 RTFx** = 音频时长 / 一次完整推理。模型已加载，先做 1 次 warmup，再连续测量 3 次并取中位数。
+- **热启动 RTFx** = 音频时长 / 一次完整推理。模型已加载，先做 1 次 warmup（只跑第一个 30 秒块），再连续测量 3 次并取中位数。
 - **纯推理 RTFx** = 音频时长 / 推理耗时，不含模型加载；冷启动表中单独列出，便于与热启动对比。
 - 显存峰值取 `torch.cuda.max_memory_allocated()` 与 `max_memory_reserved()`，单位 MB。冷启动包含加载与推理，热启动只包含测量运行。
 - RTFx 只测量模型计算，不测量进程启动、音频解码、报告写入。
@@ -146,7 +146,7 @@ $PYTHON -m bench.asr_rtfx run --audio /tmp/t2a-audio/zh_600s.wav \
 
 - `bench/results/t2a/preflight.json`：环境、权重路径与大小、三个音频的采样率与时长。
 - `bench/results/t2a/zh-{30s,60s,600s}-{cold,hot}.json`：每次运行的耗时、ASR/对齐分解、RTFx、显存、词数。
-- 数字来自 2026-10-21 的实测；GPU 上另有约 8.3 GB 被其它进程占用，但不影响本进程的 allocated/reserved 统计。
+- 数字来自 2026-10-21 的实测；GPU 上另有其它进程占用约 8–10 GB 显存（验证时为 9.5 GB），但不影响本进程的 allocated/reserved 统计。
 
 ## 独立验证
 
@@ -160,22 +160,18 @@ $PYTHON -m bench.asr_rtfx run --audio /tmp/t2a-audio/zh_600s.wav \
 
 ## 验证记录
 
-```markdown
-## 验证记录
-
 - Ticket: #4
 - Stage: T2a（性能基线，非阶段）
-- Implementer: 当前实现会话
-- Verifier:
-- Commit: ff1233a（实现）；报告与证据见后续 commit
+- Implementer: 实现会话（本分支作者）
+- Verifier: 独立验证 agent（未参与实现）
+- Commit: ff46d84（HEAD；实现 ff1233a）
 - Scope: 权重可用性 + 30s/60s/600s 冷/热 RTFx 基线
-- Preconditions:
+- Preconditions: RTX 3090、旧 venv、ModelScope 缓存 `/root/.cache/modelscope`；60s/600s 音频由夹具按文档生成
 - Config path: 不适用（benchmark CLI）
-- Fixtures: tests/fixtures/audio/zh_30s.wav；/tmp/t2a-audio/zh_60s.wav、zh_600s.wav
-- Command:
-- Expected:
-- Result:
-- Exit code:
-- Evidence:
-- Verdict: PASS / FAIL
-```
+- Fixtures: `tests/fixtures/audio/zh_30s.wav`；`/tmp/t2a-audio/zh_60s.wav`、`zh_600s.wav`
+- Command: 见“命令”小节；验证使用同样的 preflight 与 run 参数，输出写到 `/tmp/verify-rtfx`
+- Expected: 热启动 RTFx 中位数在报告值 ±10% 内，冷启动 ±25% 内，显存 ±5% 内；空缓存 preflight 退出 2
+- Result: PASS。30s 热 17.115（报告 17.316，-1.16%）；600s 热 16.873（报告 16.815，+0.35%）；30s 冷 4.708（报告 4.636，+1.54%）；显存 6062/6228 MB，与报告一致；空缓存退出 2 并指出模型 ID；六个证据 JSON 与报告表一致；未跑全流程
+- Exit code: 0（基准）；2（空缓存 preflight）
+- Evidence: `bench/results/t2a/`；验证输出在 `/tmp/verify-rtfx`
+- Verdict: PASS
