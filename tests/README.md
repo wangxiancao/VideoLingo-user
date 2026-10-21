@@ -18,7 +18,9 @@ T8 adds `tests/test_t8_burn.py` (2 tests). It checks a burned MP4 with video+aud
 
 T5 adds `tests/test_t5_segment.py` (2 tests). It uses a fixed transcript and LLM exam answer to check sentence boundaries preserve every word/timestamp, and rejects uncovered words.
 
-The full suite currently has **64 tests** (T1 29 + T2a 6 + T3 4 + T4 13 + T2b 2 + tail 3 + T7 3 + T8 2 + T5 2).
+T6 adds `tests/test_t6_translate.py` (4 tests). It checks two-step exam translation, missing-id failure, cache reuse and batched/concurrent requests.
+
+The full suite currently has **68 tests** (T1 29 + T2a 6 + T3 4 + T4 13 + T2b 2 + tail 3 + T7 3 + T8 2 + T5 2 + T6 4).
 
 Run all from the repo root with the existing dev venv:
 
@@ -28,7 +30,7 @@ Run all from the repo root with the existing dev venv:
   tests/test_t3_ingest.py tests/test_t4_transcribe.py \
   tests/test_t2b_batching.py tests/test_t4_tail_chunks.py \
   tests/test_t7_subtitle.py tests/test_t8_burn.py \
-  tests/test_t5_segment.py \
+  tests/test_t5_segment.py tests/test_t6_translate.py \
   -p no:cacheprovider
 ```
 

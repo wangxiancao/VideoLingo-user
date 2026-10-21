@@ -69,6 +69,13 @@ subtitle:
   # *Maximum cue duration; longer segments are split even if they fit the character limit
   max_duration: 10.0
 
+# New pipeline translation settings
+translation:
+  # Segments per LLM request; requests for different batches run concurrently
+  batch_size: 8
+  # Cache LLM responses under <workdir>/.llm-cache
+  cache: true
+
 # *Summary length, set low to 2k if using local LLM
 summary_length: 8000
 
