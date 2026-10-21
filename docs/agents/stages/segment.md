@@ -2,7 +2,7 @@
 
 ## 范围
 
-关联：Epic #1；T5 #9；spec #16；实现 commit 待填。
+关联：Epic #1；T5 #9；spec #16；实现 commit `cb4f2d6`。
 
 本阶段负责：
 
@@ -86,22 +86,23 @@ $PYTHON -m pipeline.runner --stages segment \
 
 ## 验证记录
 
-```markdown
-## 验证记录
-
 - Ticket: #9
 - Stage: segment
 - Implementer: 实现会话
-- Verifier:
-- Commit:
+- Verifier: 独立验证 agent（未参与实现）
+- Commit: cb4f2d6
 - Scope: transcript.json → segments.json（LLM 考题夹具）
-- Preconditions:
-- Config path:
-- Fixtures:
-- Command:
-- Expected:
-- Result:
-- Exit code:
-- Evidence:
-- Verdict: PASS / FAIL
-```
+- Preconditions: 无 GPU/网络/API key；fixture client
+- Config path: 临时复制的 `config.example.yaml`
+- Fixtures: transcript/sample_6s.json；llm/segment_exam.json、segment_exam_gap.json
+- Command: 见“命令”小节；验证写入 `/tmp`
+- Expected: 3 段、10 词、时间 0–1/1–3/3–5；缺口退出 1
+- Result: PASS
+  - 3 段，ids 1–3；文本与时间正确；词数 2/4/4，10 个词的 text/start/end 与输入完全一致
+  - gap 考题退出 1，stderr 含覆盖错误，无 segments.json
+  - 使用 fixture client，未读取/打印 API key，无真实 LLM 调用
+  - 只跑 segment；64 tests passed；仓库未修改
+- Exit code: 0（正常）；1（缺口）
+- Evidence: 上述段落/词/时间；验证输出在 `/tmp`
+- Verdict: PASS
+- 备注：真实 LLM 质量与真实 API 路径未验证，只验证结构、时间戳、覆盖和失败行为。
