@@ -2,7 +2,7 @@
 
 ## 范围
 
-关联：Epic #1；T7 #11；spec #16；实现 commit 待填。
+关联：Epic #1；T7 #11；spec #16；实现 commit `64ac103`。
 
 本阶段负责：
 
@@ -103,22 +103,22 @@ $PYTHON -m pipeline.runner --stages subtitle \
 
 ## 验证记录
 
-```markdown
-## 验证记录
-
 - Ticket: #11
 - Stage: subtitle
 - Implementer: 实现会话
-- Verifier:
-- Commit:
+- Verifier: 独立验证 agent（未参与实现）
+- Commit: 64ac103
 - Scope: translation.json → 三份 SRT
-- Preconditions:
-- Config path:
-- Fixtures:
-- Command:
-- Expected:
-- Result:
-- Exit code:
-- Evidence:
-- Verdict: PASS / FAIL
-```
+- Preconditions: 无 GPU/模型/LLM；Python 3.10.19
+- Config path: 临时复制的 `config.example.yaml`
+- Fixtures: `tests/fixtures/translation/sample_6s.json`、`tests/fixtures/segments/sample_6s.json`
+- Command: 见“命令”小节；验证写入 `/tmp`
+- Expected: 4 cues；三份文件时间戳一致；source ≤75、target ≤90；bilingual 两行；三行时校验失败
+- Result: PASS
+  - 4 cues；编号 1–4；时间 0.5–4.0（3 条）+ 4.0–6.0
+  - source 长度 49/53/57/11；target 17/18/17/3；bilingual 均两行
+  - `--validate-only` 成功；bilingual 加第三行后退出 1
+  - 60 tests passed；只跑 subtitle；仓库未修改
+- Exit code: 0（正常）；1（三行 bilingual）
+- Evidence: 上述 cue/长度/时间；验证输出在 `/tmp`
+- Verdict: PASS
