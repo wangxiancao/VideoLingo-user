@@ -138,7 +138,7 @@ $PYTHON -m bench.asr_rtfx run \
 1. 复跑 S600 batch 1、20，确认 RTFx 与显存落在容差内；S600 可完全复现。
 2. 复跑 R600 batch 20（真实音频存在时），确认 120.10 附近；缺失真实音频则标记“未验证”。
 3. 确认生产默认 batch=20、OOM 减半单测通过、阶段契约未变。
-4. 跑全部测试，确认 54 passed。
+4. 跑全部测试，确认当前全套 57 passed。
 5. 确认没有跑下游阶段或全流程。
 
 ## 验证记录
@@ -153,14 +153,14 @@ $PYTHON -m bench.asr_rtfx run \
 - Config path: 不适用（benchmark CLI）；生产默认 `config.example.yaml`
 - Fixtures: S600 由已提交夹具生成；R600 本地真实音频（源 SHA-256 已记录）
 - Command: 见“复跑”小节；验证写入 `/tmp`
-- Expected: S600 b1≈16.81、b20≈147.95；R600 b20≈120.10；生产默认 batch20；54 tests
+- Expected: S600 b1≈16.81、b20≈147.95；R600 b20≈120.10；生产默认 batch20；当前全套 57 tests（T2b 验证时 54；尾块修复后 57）
 - Result: PASS
   - S600 b1：16.98（+1.0%），6062/6228 MB，2200 words
   - S600 b20：152.05（+2.8%），10293/13224 MB，2200 words
   - R600 b20：121.89（+1.5%），10300/13224 MB，2695 words
   - 生产 stage：exit 0，wall 15.08 s；日志 `chunks=20 chunk_seconds=30 batch_size=20 segments=20 words=2695`；language=zh；时间戳单调、`end > start`、0–599.920 s；只写 transcript.json
   - 默认 batch=20；OOM 8→4→2 回退单测通过；报告表与证据 JSON 一致
-  - 54 tests passed；无下游或全流程；仓库未修改
+  - T2b 验证时 54 tests passed；尾块修复合并后当前全套 57；无下游或全流程；仓库未修改
 - Exit code: 0
 - Evidence: 上述 RTFx/显存/日志；`bench/results/t2b/`
 - Verdict: PASS
