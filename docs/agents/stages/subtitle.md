@@ -80,7 +80,7 @@ $PYTHON -m pipeline.runner --stages subtitle \
 
 ## 证据
 
-- 实测：`60 passed`（57 + T7 3）。
+- 实测：验证时 `60 passed`（57 + T7 3）；当前全套 70。
 - 夹具输出：4 cues；bilingual 两行；三份文件时间戳一致。
 - 输出示例（bilingual）：
 
@@ -118,7 +118,7 @@ $PYTHON -m pipeline.runner --stages subtitle \
   - 4 cues；编号 1–4；时间 0.5–4.0（3 条）+ 4.0–6.0
   - source 长度 49/53/57/11；target 17/18/17/3；bilingual 均两行
   - `--validate-only` 成功；bilingual 加第三行后退出 1
-  - 60 tests passed；只跑 subtitle；仓库未修改
+  - 验证时 60 tests passed；当前全套 70；只跑 subtitle；仓库未修改
 - Exit code: 0（正常）；1（三行 bilingual）
 - Evidence: 上述 cue/长度/时间；验证输出在 `/tmp`
 - Verdict: PASS

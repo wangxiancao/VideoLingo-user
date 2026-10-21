@@ -69,7 +69,7 @@ $PYTHON -m pipeline.runner --stages segment \
 
 ## 证据
 
-- 实测：`64 passed`（62 + T5 2）。
+- 实测：验证时 `64 passed`（62 + T5 2）；当前全套 70。
 - 考题输出 3 段，词数 10，时间 0–5 s；覆盖与顺序正确。
 - 缺口答案退出 1，无 segments.json。
 - 真实 LLM 未验证；只验证结构、时间戳、覆盖和失败行为。
@@ -82,7 +82,7 @@ $PYTHON -m pipeline.runner --stages segment \
 2. 检查每段词都在原 transcript 中且顺序/时间戳不变。
 3. 用 gap 考题运行，确认退出 1、无 segments.json。
 4. 确认没有真实 LLM/API 调用，也没有跑前序阶段或全流程。
-5. 跑全部测试，确认 64 passed。
+5. 跑全部测试，确认当前全套 70 passed。
 
 ## 验证记录
 
@@ -101,7 +101,7 @@ $PYTHON -m pipeline.runner --stages segment \
   - 3 段，ids 1–3；文本与时间正确；词数 2/4/4，10 个词的 text/start/end 与输入完全一致
   - gap 考题退出 1，stderr 含覆盖错误，无 segments.json
   - 使用 fixture client，未读取/打印 API key，无真实 LLM 调用
-  - 只跑 segment；64 tests passed；仓库未修改
+  - 只跑 segment；验证时 64 tests passed；当前全套 70；仓库未修改
 - Exit code: 0（正常）；1（缺口）
 - Evidence: 上述段落/词/时间；验证输出在 `/tmp`
 - Verdict: PASS

@@ -78,7 +78,7 @@ find "$WORK" -maxdepth 2 -type f -printf '%P\n' | sort
 
 ## 证据
 
-- 实测：`68 passed`（64 + T6 4）。
+- 实测：验证时 `68 passed`（64 + T6 4）；当前全套 70。
 - 考题输出：2 段，source en / target 简体中文，时间 0.5–4.0、4.0–6.0。
 - 缓存：首轮 2 次调用；次轮 0 次新调用。
 - 并发：9 段 / batch 2 → 10 次调用，9 段全部完成。
@@ -94,7 +94,7 @@ find "$WORK" -maxdepth 2 -type f -printf '%P\n' | sort
 3. 用缺 id 考题运行，确认退出 1、无 translation.json。
 4. 检查 batch/并发配置路径；真实 API 路径标记“未验证”。
 5. 确认没有真实 LLM 调用、没有跑前序阶段或全流程。
-6. 跑全部测试，确认 68 passed。
+6. 跑全部测试，确认当前全套 70 passed。
 
 ## 验证记录
 
@@ -114,7 +114,7 @@ find "$WORK" -maxdepth 2 -type f -printf '%P\n' | sort
   - `.llm-cache/` 2 个响应；第二次运行输出不变且无新调用（poison 响应测试也确认未调用）
   - 缺 id：退出 1，`missing translation id(s): [2]`，无 translation.json
   - fixture client，无网络/OpenAI 导入/密钥访问；只跑 translate
-  - 68 tests passed（含缓存与 9 段 batch=2 并发）；仓库未修改
+  - 验证时 68 tests passed（含缓存与 9 段 batch=2 并发）；当前全套 70；仓库未修改
 - Exit code: 0（正常）；1（缺 id）
 - Evidence: 上述译文/时间/缓存；验证输出在 `/tmp`
 - Verdict: PASS

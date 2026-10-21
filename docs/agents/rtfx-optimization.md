@@ -1,7 +1,7 @@
 # RTFx 优化（T2b）
 
 关联：Epic #1；T2b #5；T2c #6；spec #16；T2a 基线 `docs/agents/rtfx-baseline.md`。
-实现 commit：`a74a3c8`。分支：`feat/t2b-performance`。
+实现 commit：`a74a3c8`；真实视频 follow-up：`edd52c3`。分支：`feat/t2b-real-video-perf`。
 
 ## 验收口径
 
@@ -138,7 +138,7 @@ $PYTHON -m bench.asr_rtfx run \
 1. 复跑 S600 batch 1、20，确认 RTFx 与显存落在容差内；S600 可完全复现。
 2. 复跑 R600 batch 20（真实音频存在时），确认 120.10 附近；缺失真实音频则标记“未验证”。
 3. 确认生产默认 batch=20、OOM 减半单测通过、阶段契约未变。
-4. 跑全部测试，确认当前全套 57 passed。
+4. 跑全部测试，确认当前全套 70 passed。
 5. 确认没有跑下游阶段或全流程。
 
 ## 验证记录
@@ -166,3 +166,93 @@ $PYTHON -m bench.asr_rtfx run \
 - Verdict: PASS
 
 验证备注：20 RTFx 未被当作验收线；通过依据是真实测试集上的相对提升与绝对吞吐。
+
+## 真实视频链路（2026-10-22 T2b 重开）
+
+### 测试集
+
+真实视频来自本机归档，不提交；源文件 SHA-256 与 clip 生成方式如下。审计口径仍是 ingest → transcribe，不跑下游、不跑全流程。
+
+| ID | 源 | 视频时长 | 音频时长 | 语言 | 词数 | 说明 |
+|----|----|----------|----------|------|------|------|
+| V30 | 中文新闻 | 30.14 s | 30.0 s | zh | 98 | `-ss 15 -t 30 -c copy` |
+| V60 | 中文新闻 | 60.14 s | 60.0 s | zh | 197 | `-ss 15 -t 60 -c copy` |
+| V600 | Pi 源视频 | 600.03 s | 600.004 s | en | 1839 | 1080p 源重新编码/缩放到 640x360，保证音视频对齐 |
+
+- 中文新闻源 SHA-256：`9c9418f7b87e25a63d85f95e366316994a622fd19c834aaa4af0b068bc2530c9`
+- Pi 源 SHA-256：`abf13e73e7f1b756509d117b01376856eb3aa1d3e11329827ae3189fcb7a334a`
+- V600 初次用 `-c copy` 产生 604.6 s 视频 + 600.0 s 音频，ingest 正确拒绝；最终 clip 为对齐重编码，SHA-256 `1d7659ed7f3f1c78e4877e2613aa18399f8384b4734696d5b8abdd738c1111a9`。
+- 命令：
+
+  ```bash
+  ffmpeg -y -ss 15 -i <news.mp4> -t 30 -c copy /tmp/t2b-video/zh_news_30s.mp4
+  ffmpeg -y -ss 15 -i <news.mp4> -t 60 -c copy /tmp/t2b-video/zh_news_60s.mp4
+  ffmpeg -y -ss 15 -t 600 -i <pi.mp4> -vf scale=640:360 \
+    -c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 128k -shortest \
+    /tmp/t2b-video/pi_600s.mp4
+  ```
+
+### 链路结果
+
+每个 clip 先跑 `--stages ingest`，再跑 `--stages transcribe`（配置默认 batch=20）；两段 wall 相加为链路 wall。冷链路 RTFx 含两次进程启动与模型加载。
+
+| Clip | ingest wall | transcribe wall | 链路 wall | 冷链路 RTFx | 热 RTFx b20 |
+|------|-------------|-----------------|-----------|-------------|-------------|
+| V30 | 0.392 s | 11.892 s | 12.284 s | 2.44 | 16.30 |
+| V60 | 0.431 s | 12.192 s | 12.623 s | 4.75 | 29.40 |
+| V600 | 1.264 s | 15.600 s | 16.864 s | 35.58 | 106.66 |
+
+transcribe 日志：V30 `chunks=1 segments=1 words=98`；V60 `chunks=2 segments=2 words=197`；V600 `chunks=20 segments=20 words=1839`。V600 语言自动检测为 en。
+
+### batch 对比
+
+热 RTFx，2 次测量中位数；30 秒只有一块，batch 1/20 等价。
+
+| Clip | batch 1 | batch 20 | 倍数 | 显存 b20 alloc/reserved MB |
+|------|---------|----------|------|----------------------------|
+| V30 | 16.43 | 16.30 | 1.00x | 6062.5 / 6296 |
+| V60 | 16.37 | 29.40 | 1.80x | 6285.5 / 6688 |
+| V600 | 10.94 | 106.66 | 9.75x | 10294 / 13284 |
+
+真实 10 分钟从 10.94 提升到 106.66；真实 60 秒从 16.37 提升到 29.40；30 秒仍受单块延迟限制约 16.3。
+
+### 发现的边界修正
+
+- `bench.asr_rtfx.chunk_audio` 与生产分块保持一致：小于 1 秒的尾块并入前一块。视频抽音频常多出几毫秒，旧 bench 会切出 4 ms 尾块并失败。
+- 生产 `_clamp_words` 允许词起点越过块尾 ≤0.5 秒并夹到块边界；V600 chunk 9 的 `surface` 在 300.08 s（块尾外 0.08 s）不再使整段失败。
+- 两处都有回归测试；transcript 契约与阶段顺序不变。
+
+### 对 T2c 的输入（真实视频）
+
+| 参照线 | 真实视频结果 | 说明 |
+|--------|--------------|------|
+| 20 RTFx | V30 16.30；V60 29.40；V600 106.66（热）；V600 35.58（冷链路） | **20 不是验收线**；短音频受加载/单块延迟限制 |
+| 50 RTFx | V600 热 106.66 超过；V600 冷 35.58 未到 | 长视频热吞吐达标，冷启动仍需摊薄 |
+| 540 RTFx | 未达到 | 最好为真实视频热 106.66，不引入未验证推理栈 |
+
+结论：批量优化在真实视频链路上依然有效；真实 10 分钟热 RTFx 约 106.7，冷链路约 35.6。T2c 由人类基于热/冷两组数字决定是否进入 T9。
+
+## 真实视频验证记录
+
+- Ticket: #5
+- Stage: 性能（真实视频）
+- Implementer: 实现会话
+- Verifier: 独立验证 agent（未参与实现）
+- Commit: edd52c3
+- Scope: V30/V60/V600 ingest → transcribe + hot batch 对比
+- Preconditions: RTX 3090 24 GB、旧 venv、ModelScope 缓存；GPU 另有约 9.5 GB 占用
+- Config path: 临时复制的 `config.example.yaml`（默认 batch=20）
+- Fixtures: `/tmp/t2b-video/` 真实视频 clip；源文件 SHA-256 已记录
+- Command: 见“真实视频链路”的生成命令与 `bench.asr_rtfx` 命令
+- Expected: V600 chain≈16.86 s；hot b20≈106.66；显存≈10294/13284 MB；70 tests
+- Result: PASS
+  - 证据 JSON 与报告完全一致：chain 12.284/12.623/16.864 s；hot b20 16.297/29.399/106.660
+  - V600 复跑：ingest 1.260 s + transcribe 15.629 s = 16.889 s（+0.15%）；log chunks=20/batch=20/words=1839/en
+  - V600 hot b20：106.79（+0.12%）；显存 10294/13284 MB 精确匹配
+  - V60 hot b20 29.97（+2.0%）；显存匹配
+  - 两处边界修复与单测通过；70 tests passed；transcript 契约未变
+  - 只跑 ingest/transcribe/bench；无下游或全流程；仓库未修改
+- Exit code: 0
+- Evidence: `bench/results/t2b-video/`；验证输出在 `/tmp`
+- Verdict: PASS
+- 备注：20 RTFx 未被当作验收线；真实视频热 106.66、冷链路 35.58，供 T2c 人工决策。

@@ -32,7 +32,13 @@ def chunk_audio(samples, sample_rate, chunk_seconds):
     if chunk_seconds <= 0:
         raise ValueError("chunk_seconds must be positive")
     chunk_size = int(round(sample_rate * chunk_seconds))
-    return [samples[index : index + chunk_size] for index in range(0, len(samples), chunk_size)]
+    chunks = [samples[index : index + chunk_size] for index in range(0, len(samples), chunk_size)]
+    min_tail = int(round(sample_rate * 1.0))
+    if len(chunks) > 1 and len(chunks[-1]) < min_tail:
+        start = (len(chunks) - 2) * chunk_size
+        chunks[-2] = samples[start:]
+        chunks.pop()
+    return chunks
 
 
 def summarize_runs(rtfx_values):
