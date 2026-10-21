@@ -2,7 +2,7 @@
 
 ## 范围
 
-关联：Epic #1；T4 #8；spec #16；实现 commit `7b1c34c`。
+关联：Epic #1；T4 #8；spec #16；实现 commit `7b1c34c`；尾块修复 #24（commit `24f6f77`）。
 
 本阶段负责：
 
@@ -162,6 +162,8 @@ $PYTHON -m pipeline.runner --stages ingest,transcribe \
 - AAC 封装后音频为 30.016 s；修复前会切出 16 ms 尾块并因对齐越界失败；修复后只有 1 个块。
 - 结果：language=zh，1 segment，110 words，0.72–30.0 s，时间戳单调且 `end > start`。
 - 该检查只证明视频入口到转写；segment/translate/subtitle/burn 仍是 stub，端到端视频→字幕 MP4 尚未实现。
+
+独立验证（2026-10-21，未参与实现的 agent）：PASS。55 tests；视频两阶段退出 0；audio.wav 30.016 s 且只切 1 块；transcript language=zh、1 segment、110 words、0.72–30.0 s；时间戳单调且 `end > start`；仓库未修改。
 
 ## 独立验证
 
