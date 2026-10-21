@@ -1,5 +1,6 @@
 import math
 import re
+import wave
 from typing import Any
 
 from pipeline.contracts import CodecError, ContractError, StageContext
@@ -7,6 +8,7 @@ from pipeline.contracts import CodecError, ContractError, StageContext
 SCHEMA_VERSION = 1
 TIMESTAMP_TOLERANCE = 0.05
 TIME_EQUAL_TOLERANCE = 0.001
+MAX_AUDIO_OVERRUN = 0.5
 
 SRT_TIME_RE = re.compile(
     r"^(\d{2}):(\d{2}):(\d{2}),(\d{3}) --> (\d{2}):(\d{2}):(\d{2}),(\d{3})$"
@@ -115,8 +117,9 @@ def _validate_segments(
     ctx: StageContext,
     key: str,
     require_ids: bool,
-) -> None:
+) -> float:
     _validate_timing(segments, ctx, key, require_ids)
+    last_end = 0.0
     for index, raw_segment in enumerate(segments):
         field = f"segments[{index}]"
         segment = _mapping(raw_segment, ctx, key, field)
@@ -132,13 +135,35 @@ def _validate_segments(
             ctx,
             key,
         )
+        last_end = float(segment["end"])
+    return last_end
+
+
+def _wav_duration(path) -> float | None:
+    try:
+        with wave.open(str(path), "rb") as wav:
+            rate = wav.getframerate()
+            if rate <= 0:
+                return None
+            return wav.getnframes() / float(rate)
+    except (OSError, wave.Error):
+        return None
 
 
 def validate_transcript(ctx: StageContext) -> None:
     data = _check_schema(_read_json(ctx, "transcript"), ctx, "transcript")
     _text(data.get("language"), ctx, "transcript", "language")
     segments = _list(data.get("segments"), ctx, "transcript", "segments")
-    _validate_segments(segments, ctx, "transcript", require_ids=False)
+    last_end = _validate_segments(segments, ctx, "transcript", require_ids=False)
+    audio = ctx.path("audio")
+    if audio.is_file():
+        duration = _wav_duration(audio)
+        if duration is not None and last_end > duration + MAX_AUDIO_OVERRUN:
+            _fail(
+                ctx,
+                "transcript",
+                f"last end {last_end:.3f}s exceeds audio duration {duration:.3f}s",
+            )
 
 
 def validate_segments(ctx: StageContext) -> None:
