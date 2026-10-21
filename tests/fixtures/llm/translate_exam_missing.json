@@ -1,0 +1,10 @@
+{
+  "name": "translate_exam_missing",
+  "responses": [
+    {
+      "translations": [
+        {"id": 1, "target": "只有第一句。"}
+      ]
+    }
+  ]
+}

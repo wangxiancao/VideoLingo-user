@@ -1,0 +1,17 @@
+{
+  "name": "translate_exam",
+  "responses": [
+    {
+      "translations": [
+        {"id": 1, "target": "这是一段故意写得很长的中文直译版本，用来测试字幕翻译。"},
+        {"id": 2, "target": "短句。"}
+      ]
+    },
+    {
+      "translations": [
+        {"id": 1, "target": "这是经过意译和反思后的自然中文版本。"},
+        {"id": 2, "target": "短句。"}
+      ]
+    }
+  ]
+}
