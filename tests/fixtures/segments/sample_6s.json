@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "segments": [
+    {
+      "id": 1,
+      "start": 0.5,
+      "end": 4.0,
+      "text": "This is a deliberately long English sentence used to force subtitle splitting into multiple cues so the source line respects the configured display length limit.",
+      "words": [
+        {"start": 0.5, "end": 1.5, "text": "This"},
+        {"start": 1.5, "end": 2.5, "text": "deliberately"},
+        {"start": 2.5, "end": 3.2, "text": "long"},
+        {"start": 3.2, "end": 4.0, "text": "sentence."}
+      ]
+    },
+    {
+      "id": 2,
+      "start": 4.0,
+      "end": 6.0,
+      "text": "Short line.",
+      "words": [
+        {"start": 4.0, "end": 5.0, "text": "Short"},
+        {"start": 5.0, "end": 6.0, "text": "line."}
+      ]
+    }
+  ]
+}

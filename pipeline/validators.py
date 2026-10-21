@@ -278,6 +278,10 @@ def validate_srt_set(ctx: StageContext) -> None:
                 or abs(left["end"] - right["end"]) > TIME_EQUAL_TOLERANCE
             ):
                 _fail(ctx, key, f"SRT cue {index + 1} timing differs from srt_source")
+    for index, cue in enumerate(cues_by_key["srt_bilingual"], start=1):
+        lines = cue["text"].split("\n")
+        if len(lines) != 2 or not all(line.strip() for line in lines):
+            _fail(ctx, "srt_bilingual", f"SRT cue {index} must contain source and target lines")
 
 
 def validate_media(ctx: StageContext, key: str) -> None:

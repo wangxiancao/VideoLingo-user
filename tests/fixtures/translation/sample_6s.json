@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "source_language": "en",
+  "target_language": "zh-CN",
+  "segments": [
+    {
+      "id": 1,
+      "start": 0.5,
+      "end": 4.0,
+      "source": "This is a deliberately long English sentence used to force subtitle splitting into multiple cues so the source line respects the configured display length limit.",
+      "target": "这是一段故意写得很长的中文译文，用来强制字幕按显示长度拆分成多条字幕，并验证源文和译文的时间戳完全一致。"
+    },
+    {
+      "id": 2,
+      "start": 4.0,
+      "end": 6.0,
+      "source": "Short line.",
+      "target": "短句。"
+    }
+  ]
+}

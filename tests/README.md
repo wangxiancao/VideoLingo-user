@@ -12,7 +12,9 @@ T2b adds `tests/test_t2b_batching.py` (2 tests). It checks the default batch siz
 
 The tail-chunk fix adds `tests/test_t4_tail_chunks.py` (3 tests). It checks that a final chunk shorter than 1 s is merged into the previous chunk while exact 30/60 s chunking is unchanged.
 
-The full suite currently has **57 tests** (T1 29 + T2a 6 + T3 4 + T4 13 + T2b 2 + tail 3).
+T7 adds `tests/test_t7_subtitle.py` (3 tests). It checks three consistent SRTs, display-length splitting, bilingual two-line output and the validation failure path.
+
+The full suite currently has **60 tests** (T1 29 + T2a 6 + T3 4 + T4 13 + T2b 2 + tail 3 + T7 3).
 
 Run all from the repo root with the existing dev venv:
 
@@ -21,6 +23,7 @@ Run all from the repo root with the existing dev venv:
   tests/test_t1_runner.py tests/test_t2a_rtfx.py \
   tests/test_t3_ingest.py tests/test_t4_transcribe.py \
   tests/test_t2b_batching.py tests/test_t4_tail_chunks.py \
+  tests/test_t7_subtitle.py \
   -p no:cacheprovider
 ```
 
