@@ -84,7 +84,7 @@ def _validate_words(
         _text(item.get("text"), ctx, key, f"{field}.text")
 
 
-def _validate_segments(
+def _validate_timing(
     segments: list,
     ctx: StageContext,
     key: str,
@@ -110,14 +110,34 @@ def _validate_segments(
             _fail(ctx, key, f"{field}.start regressed")
         if previous_end is not None and start < previous_end - TIMESTAMP_TOLERANCE:
             _fail(ctx, key, f"{field} overlaps the previous segment")
+        previous_start = start
+        previous_end = end
+        last_end = end
+    return last_end
+
+
+def _validate_segments(
+    segments: list,
+    ctx: StageContext,
+    key: str,
+    require_ids: bool,
+) -> float:
+    last_end = _validate_timing(segments, ctx, key, require_ids)
+    for index, raw_segment in enumerate(segments):
+        field = f"segments[{index}]"
+        segment = _mapping(raw_segment, ctx, key, field)
         _text(segment.get("text"), ctx, key, f"{field}.text")
         words = _list(segment.get("words"), ctx, key, f"{field}.words")
         if not words:
             _fail(ctx, key, f"{field}.words must not be empty")
-        _validate_words(words, start, end, index, ctx, key)
-        previous_start = start
-        previous_end = end
-        last_end = end
+        _validate_words(
+            words,
+            float(segment["start"]),
+            float(segment["end"]),
+            index,
+            ctx,
+            key,
+        )
     return last_end
 
 
@@ -150,7 +170,6 @@ def validate_transcript(ctx: StageContext) -> None:
 
 def validate_segments(ctx: StageContext) -> None:
     data = _check_schema(_read_json(ctx, "segments"), ctx, "segments")
-    _text(data.get("language"), ctx, "segments", "language")
     segments = _list(data.get("segments"), ctx, "segments", "segments")
     _validate_segments(segments, ctx, "segments", require_ids=True)
 
@@ -160,28 +179,12 @@ def validate_translation(ctx: StageContext) -> None:
     _text(data.get("source_language"), ctx, "translation", "source_language")
     _text(data.get("target_language"), ctx, "translation", "target_language")
     segments = _list(data.get("segments"), ctx, "translation", "segments")
-    if not segments:
-        _fail(ctx, "translation", "segments must not be empty")
-
-    previous_start = None
-    previous_end = None
+    _validate_timing(segments, ctx, "translation", require_ids=True)
     for index, raw_segment in enumerate(segments):
         field = f"segments[{index}]"
         segment = _mapping(raw_segment, ctx, "translation", field)
-        if segment.get("id") != index + 1:
-            _fail(ctx, "translation", f"{field}.id must be {index + 1}")
-        start = _number(segment.get("start"), ctx, "translation", f"{field}.start")
-        end = _number(segment.get("end"), ctx, "translation", f"{field}.end")
-        if start < 0 or end <= start:
-            _fail(ctx, "translation", f"{field} has an invalid time range")
-        if previous_start is not None and start < previous_start:
-            _fail(ctx, "translation", f"{field}.start regressed")
-        if previous_end is not None and start < previous_end - TIMESTAMP_TOLERANCE:
-            _fail(ctx, "translation", f"{field} overlaps the previous segment")
         _text(segment.get("source"), ctx, "translation", f"{field}.source")
         _text(segment.get("target"), ctx, "translation", f"{field}.target")
-        previous_start = start
-        previous_end = end
 
     reference = _read_json(ctx, "segments")
     reference_segments = reference.get("segments") if isinstance(reference, dict) else None
@@ -242,6 +245,10 @@ def _parse_srt(ctx: StageContext, key: str) -> list[dict]:
                 "line_count": len(text_lines),
             }
         )
+    return cues
+
+
+def _validate_cues(cues: list[dict], ctx: StageContext, key: str) -> None:
     previous_start = None
     previous_end = None
     for cue in cues:
@@ -251,20 +258,20 @@ def _parse_srt(ctx: StageContext, key: str) -> list[dict]:
             _fail(ctx, key, f"SRT cue {cue['index']} overlaps the previous cue")
         previous_start = cue["start"]
         previous_end = cue["end"]
-    return cues
+    if key == "srt_bilingual" and any(cue["line_count"] < 2 for cue in cues):
+        _fail(ctx, "srt_bilingual", "each bilingual cue needs source and target lines")
 
 
 def validate_srt(ctx: StageContext, key: str) -> None:
-    cues = _parse_srt(ctx, key)
-    if key == "srt_bilingual" and any(cue["line_count"] < 2 for cue in cues):
-        _fail(ctx, "srt_bilingual", "each bilingual cue needs source and target lines")
+    _validate_cues(_parse_srt(ctx, key), ctx, key)
 
 
 def validate_srt_set(ctx: StageContext) -> None:
     cues_by_key = {}
     for key in ("srt_source", "srt_target", "srt_bilingual"):
-        validate_srt(ctx, key)
-        cues_by_key[key] = _parse_srt(ctx, key)
+        cues = _parse_srt(ctx, key)
+        _validate_cues(cues, ctx, key)
+        cues_by_key[key] = cues
     counts = {key: len(cues) for key, cues in cues_by_key.items()}
     if len(set(counts.values())) != 1:
         _fail(ctx, "srt_bilingual", "SRT files have different cue counts")
@@ -279,6 +286,7 @@ def validate_srt_set(ctx: StageContext) -> None:
 
 
 def validate_media(ctx: StageContext, key: str) -> None:
+    """T1 checks existence and size only; codec and duration checks belong to T3/T8."""
     path = ctx.path(key)
     try:
         if not path.is_file():
@@ -297,15 +305,12 @@ VALIDATORS = {
     "translation": validate_translation,
     "srt_source": lambda ctx: validate_srt(ctx, "srt_source"),
     "srt_target": lambda ctx: validate_srt(ctx, "srt_target"),
-    "srt_bilingual": lambda ctx: validate_srt(ctx, "srt_bilingual"),
+    "srt_bilingual": validate_srt_set,
     "output_video": lambda ctx: validate_media(ctx, "output_video"),
 }
 
 
 def validate_artifact(ctx: StageContext, key: str) -> None:
-    if key == "srt_bilingual":
-        validate_srt_set(ctx)
-        return
     validator = VALIDATORS.get(key)
     if validator is None:
         raise ContractError(f"no validator for artifact '{key}'")

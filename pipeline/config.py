@@ -26,7 +26,7 @@ class ReadOnlyConfig:
         self._data = data
 
     def get(self, key: str, default: Any = None) -> Any:
-        current: Any = self._data
+        current = self._data
         for part in key.split("."):
             if not isinstance(current, dict) or part not in current:
                 return default

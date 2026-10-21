@@ -91,6 +91,16 @@ def _check_requires(
             )
 
 
+def _validate_requires(stage: StageSpec, ctx: StageContext) -> None:
+    for key in stage.requires:
+        try:
+            validate_artifact(ctx, key)
+        except ContractError as exc:
+            raise ContractError(
+                f"stage '{stage.id}' input '{key}' is invalid: {exc}"
+            ) from exc
+
+
 def _run_stage(
     stage: StageSpec,
     ctx: StageContext,
@@ -98,6 +108,7 @@ def _run_stage(
     validate_only: bool,
 ) -> None:
     _check_requires(stage, ctx, stages)
+    _validate_requires(stage, ctx)
     if validate_only:
         for key in stage.produces:
             validate_artifact(ctx, key)
@@ -109,13 +120,20 @@ def _run_stage(
         stage.run(ctx)
     except NotImplementedError as exc:
         raise StageError(f"stage '{stage.id}' is not implemented: {exc}") from exc
-    except PipelineError:
+    except StageError:
         raise
+    except PipelineError as exc:
+        raise type(exc)(f"stage '{stage.id}': {exc}") from exc
     except Exception as exc:
         raise StageError(f"stage '{stage.id}' failed: {exc}") from exc
 
-    for key in stage.produces:
-        validate_artifact(ctx, key)
+    try:
+        for key in stage.produces:
+            validate_artifact(ctx, key)
+    except ContractError as exc:
+        raise ContractError(
+            f"stage '{stage.id}' output validation failed: {exc}"
+        ) from exc
 
 
 def run(
@@ -133,7 +151,8 @@ def run(
         selected = _select_stages(ids, stages)
         config = ReadOnlyConfig(config_path)
         fixture = _check_llm_fixture(llm_fixture)
-        _check_source(selected, source)
+        if not validate_only:
+            _check_source(selected, source)
 
         work_path = Path(workdir)
         if work_path.exists() and not work_path.is_dir():

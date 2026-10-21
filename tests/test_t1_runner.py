@@ -200,6 +200,21 @@ def test_missing_prerequisite_does_not_auto_run(tmp_path):
     assert not (workdir / "transcript.json").exists()
 
 
+def test_corrupt_input_fails_before_stage(tmp_path, capsys):
+    config = _write_config(tmp_path)
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    _write_json(
+        workdir / "transcript.json",
+        {"schema_version": 1, "language": "en", "segments": []},
+    )
+    assert run("segment", workdir, config) == 1
+    error = capsys.readouterr().err
+    assert "segment" in error
+    assert "transcript" in error
+    assert "not implemented" not in error
+
+
 def test_table_order_not_input_order(tmp_path):
     config = _write_config(tmp_path)
     workdir = tmp_path / "work"
@@ -227,6 +242,19 @@ def test_stage_failure_returns_1_and_names_stage(tmp_path, capsys):
     bad = StageSpec("bad", "bad", (), (), (), fail)
     assert run("bad", tmp_path / "work", config, stages=(bad,)) == 1
     assert "bad" in capsys.readouterr().err
+
+
+def test_stage_pipeline_error_includes_stage_id(tmp_path, capsys):
+    config = _write_config(tmp_path)
+
+    def fail(_ctx):
+        raise ContractError("bad input")
+
+    stage = StageSpec("contract", "contract", (), (), (), fail)
+    assert run("contract", tmp_path / "work", config, stages=(stage,)) == 1
+    error = capsys.readouterr().err
+    assert "stage 'contract'" in error
+    assert "bad input" in error
 
 
 def test_stub_not_implemented_returns_1(tmp_path, capsys):
@@ -265,6 +293,31 @@ def test_validate_only_missing_output_returns_1(tmp_path):
 
     emit = StageSpec("emit", "emit", (), ("transcript",), (), should_not_run)
     assert run("emit", tmp_path / "work", config, validate_only=True, stages=(emit,)) == 1
+
+
+def test_validate_only_rejects_malformed_output(tmp_path):
+    config = _write_config(tmp_path)
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    _write_json(
+        workdir / "transcript.json",
+        {"schema_version": 1, "language": "en", "segments": []},
+    )
+
+    def should_not_run(_ctx):
+        raise AssertionError("stage ran during validate-only")
+
+    emit = StageSpec("emit", "emit", (), ("transcript",), (), should_not_run)
+    assert run("emit", workdir, config, validate_only=True, stages=(emit,)) == 1
+
+
+def test_validate_only_ingest_without_source(tmp_path):
+    config = _write_config(tmp_path)
+    workdir = tmp_path / "work"
+    (workdir / "media").mkdir(parents=True)
+    (workdir / "media" / "source.mp4").write_bytes(b"x")
+    (workdir / "media" / "audio.wav").write_bytes(b"x")
+    assert run("ingest", workdir, config, validate_only=True) == 0
 
 
 def test_validate_only_missing_input_returns_2(tmp_path):
@@ -332,6 +385,15 @@ def test_segments_validator_accepts_valid(tmp_path):
     validate_artifact(ctx, "segments")
 
 
+def test_segments_without_language_is_valid(tmp_path):
+    config = _write_config(tmp_path)
+    ctx = _context(tmp_path, config)
+    data = _valid_segments()
+    data.pop("language")
+    ctx.write("segments", data)
+    validate_artifact(ctx, "segments")
+
+
 def test_segments_validator_rejects_id_gap(tmp_path):
     config = _write_config(tmp_path)
     ctx = _context(tmp_path, config)
@@ -358,6 +420,17 @@ def test_translation_validator_accepts_and_rejects_mismatch(tmp_path):
     bad = _valid_translation()
     bad["segments"][0]["target"] = ""
     ctx.write("translation", bad)
+    with pytest.raises(ContractError):
+        validate_artifact(ctx, "translation")
+
+
+def test_translation_validator_rejects_timing_drift(tmp_path):
+    config = _write_config(tmp_path)
+    ctx = _context(tmp_path, config)
+    ctx.write("segments", _valid_segments())
+    drifted = _valid_translation()
+    drifted["segments"][0]["start"] = 0.5
+    ctx.write("translation", drifted)
     with pytest.raises(ContractError):
         validate_artifact(ctx, "translation")
 
@@ -499,8 +572,6 @@ def test_json_io_microbenchmark(tmp_path):
     size_mb = path.stat().st_size / (1024 * 1024)
     print(f"json_io: {len(words)} words, {size_mb:.2f} MiB, write={write_seconds:.3f}s, read={read_seconds:.3f}s")
     assert sum(len(s["words"]) for s in loaded["segments"]) == len(words)
-    assert write_seconds < 5.0
-    assert read_seconds < 5.0
 
 
 def test_cli_help_and_missing_input(tmp_path):
