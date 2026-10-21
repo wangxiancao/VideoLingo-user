@@ -71,7 +71,7 @@ ffmpeg -y -v error -ss 1.5 -i "$WORK/output.mp4" -frames:v 1 "$WORK/frame.png"
 
 ## 证据
 
-- 实测：`62 passed`（60 + T8 2）。
+- 实测：验证时 `62 passed`（60 + T8 2）；当前全套 70。
 - Runner 输出：`output.mp4` 5.022 s，H.264 320x240 + AAC；抽帧 1.5 s 可见中文字幕。
 - 损坏源视频：退出 1，无 `output.mp4`。
 
@@ -84,7 +84,7 @@ ffmpeg -y -v error -ss 1.5 -i "$WORK/output.mp4" -frames:v 1 "$WORK/frame.png"
 3. 抽 1.5 s 帧并目视确认中文正常、无方块。
 4. 用损坏的 source.mp4 运行，确认退出 1 且无输出。
 5. 确认只跑 burn，未跑前序阶段或全流程。
-6. 跑全部测试，确认 62 passed。
+6. 跑全部测试，确认当前全套 70 passed。
 
 ## 验证记录
 
@@ -103,7 +103,7 @@ ffmpeg -y -v error -ss 1.5 -i "$WORK/output.mp4" -frames:v 1 "$WORK/frame.png"
   - output.mp4 5.022 s（与源差 0.0）；H.264 320x240 + AAC
   - 1.5 s 抽帧可见“中文字幕渲染测试”，CJK 正常、无方块
   - 损坏源：退出 1，stderr 含 `stage 'burn'` 与 ffprobe 错误，无 output/temp
-  - 仅跑 burn；62 tests passed；仓库未修改
+  - 仅跑 burn；验证时 62 tests passed；当前全套 70；仓库未修改
 - Exit code: 0（正常）；1（损坏源）
 - Evidence: 上述流/时长/抽帧；验证输出在 `/tmp`
 - Verdict: PASS

@@ -1,7 +1,7 @@
 # RTFx 优化（T2b）
 
 关联：Epic #1；T2b #5；T2c #6；spec #16；T2a 基线 `docs/agents/rtfx-baseline.md`。
-实现 commit：`a74a3c8`。分支：`feat/t2b-performance`。
+实现 commit：`a74a3c8`；真实视频 follow-up：`edd52c3`。分支：`feat/t2b-real-video-perf`。
 
 ## 验收口径
 
@@ -234,22 +234,25 @@ transcribe 日志：V30 `chunks=1 segments=1 words=98`；V60 `chunks=2 segments=
 
 ## 真实视频验证记录
 
-```markdown
-## 验证记录
-
 - Ticket: #5
 - Stage: 性能（真实视频）
 - Implementer: 实现会话
-- Verifier:
-- Commit:
+- Verifier: 独立验证 agent（未参与实现）
+- Commit: edd52c3
 - Scope: V30/V60/V600 ingest → transcribe + hot batch 对比
-- Preconditions:
-- Config path:
-- Fixtures:
-- Command:
-- Expected:
-- Result:
-- Exit code:
-- Evidence:
-- Verdict: PASS / FAIL
-```
+- Preconditions: RTX 3090 24 GB、旧 venv、ModelScope 缓存；GPU 另有约 9.5 GB 占用
+- Config path: 临时复制的 `config.example.yaml`（默认 batch=20）
+- Fixtures: `/tmp/t2b-video/` 真实视频 clip；源文件 SHA-256 已记录
+- Command: 见“真实视频链路”的生成命令与 `bench.asr_rtfx` 命令
+- Expected: V600 chain≈16.86 s；hot b20≈106.66；显存≈10294/13284 MB；70 tests
+- Result: PASS
+  - 证据 JSON 与报告完全一致：chain 12.284/12.623/16.864 s；hot b20 16.297/29.399/106.660
+  - V600 复跑：ingest 1.260 s + transcribe 15.629 s = 16.889 s（+0.15%）；log chunks=20/batch=20/words=1839/en
+  - V600 hot b20：106.79（+0.12%）；显存 10294/13284 MB 精确匹配
+  - V60 hot b20 29.97（+2.0%）；显存匹配
+  - 两处边界修复与单测通过；70 tests passed；transcript 契约未变
+  - 只跑 ingest/transcribe/bench；无下游或全流程；仓库未修改
+- Exit code: 0
+- Evidence: `bench/results/t2b-video/`；验证输出在 `/tmp`
+- Verdict: PASS
+- 备注：20 RTFx 未被当作验收线；真实视频热 106.66、冷链路 35.58，供 T2c 人工决策。
