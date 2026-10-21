@@ -139,7 +139,7 @@ $PYTHON -m pipeline.runner --stages ingest --workdir "$WORK" --config "$WORK/con
 
 | 阶段 | 必查 |
 |------|------|
-| ingest | `media/source.mp4` 与 16k mono `media/audio.wav` 存在；时长/采样率正确；不做人声分离。 |
+| ingest | `media/source.mp4` 与 16k mono `media/audio.wav` 存在；时长/采样率正确；不做人声分离。阶段文档：`docs/agents/stages/ingest.md`。 |
 | transcribe | 语言、分段、词级时间戳完整；时间戳单调且在音频范围内；失败显式报错。 |
 | segment | 句子边界合理；词级时间戳不漂移；LLM 失败不静默留下未切句。 |
 | translate | 源文/译文结构完整；时间戳不变；两步流程可复现；失败显式报错。 |

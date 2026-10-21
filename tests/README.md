@@ -4,13 +4,17 @@ T1 has one focused test file: `tests/test_t1_runner.py` (29 tests). It checks th
 
 T2a adds `tests/test_t2a_rtfx.py` (6 tests). It checks audio chunking, RTFx summary math, and the preflight/run error paths without loading models.
 
-Run both from the repo root with the existing dev venv:
+T3 adds `tests/test_t3_ingest.py` (4 tests). It runs ingest through the stage runner for a local file and a localhost URL, plus missing-audio and unsupported-scheme failures.
+
+Run all three from the repo root with the existing dev venv:
 
 ```bash
-/root/VideoLingo/.venv/bin/python -m pytest -q tests/test_t1_runner.py tests/test_t2a_rtfx.py -p no:cacheprovider
+/root/VideoLingo/.venv/bin/python -m pytest -q \
+  tests/test_t1_runner.py tests/test_t2a_rtfx.py tests/test_t3_ingest.py \
+  -p no:cacheprovider
 ```
 
-`pytest` is a dev tool already present in that venv; it is not a runtime dependency. Do not add a broad test suite. Stage verification still follows `docs/agents/verification.md`; the T2a benchmark procedure is in `docs/agents/rtfx-baseline.md`.
+`pytest` is a dev tool already present in that venv; it is not a runtime dependency. Do not add a broad test suite. Stage verification still follows `docs/agents/verification.md`; stage procedures live in `docs/agents/stages/`.
 
 ## RTFx benchmark
 
