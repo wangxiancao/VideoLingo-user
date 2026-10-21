@@ -1,6 +1,10 @@
 # 阶段级验证（T0 模板）
 
+关联：Epic #1；T0 #2；spec #16；阶段票 #3–#13。
+
 目标：验证 agent 能在**不跑全流程**的情况下接手任一阶段，按固定夹具与命令判断它是否真的工作；实现 agent 与验证 agent 必须是不同的 agent。
+
+阶段 id：ingest、transcribe、segment、translate、subtitle、burn。性能票 T2a #4、T2b #5、T2c #6；收尾 T9 #13。新阶段 id 与旧 `_N_` 编号的对照由 T1 的阶段表维护，T0 不另立编号。
 
 ## 接缝
 
@@ -18,13 +22,14 @@
 
 ## 环境
 
-- 本机使用现有解释器，绝不使用 PATH 上的裸 `python`：
+- 使用仓库记录的 Python 解释器，绝不使用 PATH 上的裸 `python`：
 
   ```bash
-  PYTHON=/root/VideoLingo/.venv/bin/python
+  # 本机示例；新 worktree 暂无 .venv，使用主 checkout 的 venv
+  PYTHON=${PYTHON:-/root/VideoLingo/.venv/bin/python}
   ```
 
-  新 worktree 没有自己的 `.venv`；如果后续新建了独立 venv，必须把绝对路径记录到 ticket 和本文件，再替换命令。
+  如果当前 worktree 有自己的 `.venv`，用 `.venv/bin/python`；如果新建了独立 venv，把绝对路径记录到 ticket 和本文件。命令里的 `$PYTHON` 必须能被验证 agent 复现。
 - 需要模型权重、FFmpeg、GPU/网络时，在验证文档的“前置条件”里写明；缺条件就记为“未验证”，不能猜测通过。
 - 使用独立工作区；不要清空或覆盖他人的 `output/`。
 - 不读取、不打印任何密钥；配置文件只读。
@@ -38,16 +43,20 @@ $PYTHON -m pipeline.runner \
   --stages <stage-id>[,<stage-id>...] \
   --workdir <workdir> \
   --config <config-path> \
-  [--source <path-or-url>]   # 仅 ingest 需要
+  [--source <path-or-url>] \
+  [--llm-fixture <path>] \
+  [--validate-only]
 ```
 
 - `--stages`：逗号分隔的阶段 id，按流水线顺序执行；只跑列出的阶段，不自动补跑前置阶段。
 - `--workdir`：阶段输入/输出的根目录；runner 不清空它。
 - `--config`：显式配置路径；runner 只读，不写回 `config.yaml`。
 - `--source`：ingest 的输入路径或 URL；其他阶段不需要。ingest 把它规范化为 `media/source.mp4` 与 `media/audio.wav`。
+- `--llm-fixture`：LLM 阶段注入固定响应夹具；验证只校验结构、时间戳、失败行为与缓存命中，不断言具体措辞。
 - `--validate-only`：只重跑目标阶段的产物校验，不执行阶段。
 - 退出码：`0` 成功；`1` 阶段失败或产物校验失败；`2` 缺少输入或配置。
 - 从仓库根运行，保证 `-m pipeline` 可导入；workdir 可以在仓库外。
+- 这份接口是 T0 给 T1 的最小契约；T1 若要改，先更新本文件与 ticket #3。
 - 不允许通过 CLI 入口跑全流程；全流程只用于 T9 的最终验收。
 
 ## Workdir 与夹具映射
@@ -78,6 +87,9 @@ $PYTHON -m pipeline.runner \
 | subtitle | `translation.json` | `subs/source.srt`、`subs/target.srt`、`subs/bilingual.srt` |
 | burn | `media/source.mp4` + `subs/source.srt` + `subs/target.srt` | `output.mp4` |
 
+> 本表是 T0 的验证约定；T1 的阶段表是最终契约。T1 若要改文件名，先更新本文件与 ticket #3。
+> 最终 SRT 兼容：新管线内部使用 source/target/bilingual 三份；切换时按 `docs/agents/execution-chain.md` 的旧集合做映射（src/trans/src_trans；`trans_src` 与音频 SRT 因配音移除不在范围）。
+
 验证时先在 scratch 目录里铺好输入，例如：
 
 ```bash
@@ -93,7 +105,7 @@ $PYTHON -m pipeline.runner --stages ingest --workdir "$WORK" --config "$WORK/con
   --source tests/fixtures/video/sample_5s.mp4
 ```
 
-其他阶段的夹具复制方式相同：把 `tests/fixtures/<type>/<name>` 复制到表中对应的输入文件名。T3–T8 负责添加实际夹具；T0 只定义目录、文件名与命令契约。**一个阶段 ticket 在对应夹具存在之前不能算完成。**
+其他阶段的夹具复制方式相同：把 `tests/fixtures/<type>/<name>` 复制到表中对应的输入文件名。T3–T8 负责添加实际夹具；T0 只定义目录、文件名与命令契约（见 `tests/fixtures/README.md`）。
 
 ## 配置
 

@@ -1,5 +1,7 @@
 # 工具层审计（T0）
 
+关联：Epic #1；T0 #2；spec #16；性能票 #4–#6；阶段票 #7–#13。
+
 范围：新 `pipeline` 可以复用的现有工具，以及必须新写的部分。结论只针对 v0.3 的 6 阶段重写；配音与 UI 已排除。
 
 判定含义：
@@ -15,7 +17,7 @@
 |-----------|------|------|------|
 | `core/utils/config_utils.py` | 读取与更新本地配置 | **包装后复用（只读）** | `load_key` 可读配置，但硬编码 `config.yaml`、不接受路径参数；新 runner 的 `--config` 需要一层薄包装或新 loader。`update_key` 会写 `config.yaml`，新管线禁止使用。锁是进程内 `threading.Lock`，不提供跨进程安全。 |
 | `core/utils/ask_gpt.py` | LLM 调用、JSON 修复、缓存、重试 | **新写薄客户端** | `ask_gpt` 只作行为参考：缓存固定写到 `output/gpt_log/<log_title>.json`，与旧 `output` 生命周期绑定；没有 API 预检；占位 `api.key` 也会通过存在性检查。新客户端必须支持显式配置、独立缓存目录/命名空间、可注入假客户端，不复用旧缓存路径。 |
-| `core/utils/decorator.py` | 重试/退避、文件存在跳过 | **直接复用** | 通用工具，无阶段耦合。`check_file_exists` 使用静态路径，配 runner 工作区时要显式传入。 |
+| `core/utils/decorator.py` | 重试/退避、文件存在跳过 | **直接复用（仅 `except_handler`）** | `except_handler` 通用、无阶段耦合；`check_file_exists` 会静默跳过并在退出码 0 下留下不完整产物，新管线禁用。 |
 | `core/utils/onekeycleanup.py` | 把 `output` 归档到 `history` | **包装后复用（收尾）** | 依赖 `find_video_files`，同名 history 会覆盖；不在关键路径，T9 再定归档策略。 |
 | `core/_1_ytdlp.py` | 下载视频、查找源视频 | **新写（参考）** | YouTube 客户端回退可参考；`update_ytdlp()` 在运行时执行 `pip install --upgrade`，不能进新管线；`find_video_files` 假设 `output` 里只有一个视频。新 ingest 使用显式路径。 |
 | `core/asr_backend/audio_preprocess.py` | 音频预处理、Whisper CJK 巨块修补 | **不复用** | 与 Whisper/pandas 的产物形状绑定；新 ASR 走 GLM-ASR + ForcedAligner，不需要这套修补。 |
@@ -31,12 +33,12 @@
 | FFmpeg 通用封装 | 解码、烧录、媒体探测 | **新写** | 仓库没有通用 FFmpeg 工具；旧阶段直接拼命令。新 `pipeline/media` 负责转义、字体与错误处理。 |
 | `requirements.txt` | Python 依赖清单 | **不复用** | 已过期：transformers 钉 4.39.3、仍列 `qwen-asr`/`demucs`/`streamlit`。新管线单独维护依赖，T2a 再补 `torchcodec`。 |
 | `core/st_utils/`、`st.py`、`translations/` | Web UI | **不复用** | 已冻结，重构落地后按原计划删除。 |
-| `external/video-miner/` | 参考实现 | **不复用** | 无 LICENSE，不接源码、二进制或模型；只重写其技术路线。 |
+| 本地参考 checkout `external/video-miner/`（不在本 worktree） | 参考实现 | **不复用** | 无 LICENSE，不接源码、二进制或模型；只重写其技术路线。 |
 | `core/utils/pypi_autochoose.py`、`delete_retry_dubbing.py` | 安装器、TTS 清理 | **不复用** | 与旧安装/配音绑定。 |
 
 ## 结论
 
-- **直接复用**：`decorator`。
+- **直接复用**：`decorator`（仅 `except_handler`；`check_file_exists` 禁用）。
 - **包装后复用**：`config_utils`（只读路径适配）、`onekeycleanup`（收尾）、代理清理工具。
 - **新写**：LLM 薄客户端（`ask_gpt` 仅作参考）、ingest 下载与显式路径、ASR 后端、segment/translate 的提示词、subtitle、burn 的 media 层、ModelScope 下载封装、JSON 契约与 runner。
 - **不复用**：Whisper、demucs、spacy、旧提示词、旧产物路径常量、UI、video-miner。
@@ -48,5 +50,5 @@
 3. **禁止运行时 pip**：ingest 不能沿用 `update_ytdlp()` 的自动升级。
 4. **归档覆盖**：`onekeycleanup` 会覆盖同名 history；T9 需要明确是否沿用。
 5. **依赖清单分家**：新管线不直接复用旧 `requirements.txt`；新增依赖要单独记录。
-6. **旧契约不回流**：新 JSON 契约不为兼容旧 xlsx/txt 而妥协；最终 SRT/MP4 保持兼容即可。
+6. **旧契约不回流**：新 JSON 契约不为兼容旧 xlsx/txt 而妥协；最终 SRT/MP4 通过 `execution-chain.md` 的旧集合映射保持兼容（source/target/bilingual → src/trans/src_trans；`trans_src` 与音频 SRT 因配音移除不在范围）。
 7. **代理处理**：只在当前进程内清理代理变量，不修改用户 shell 或全局环境。

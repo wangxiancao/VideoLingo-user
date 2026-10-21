@@ -17,7 +17,7 @@ VideoLingo 是一个的视频转录、翻译、字幕与配音应用。Streamlit
 ## 开发流程
 
 1. 改动产物路径、表格列、时间戳、排序规则或函数签名之前，先追清它的生产者与消费者；从 `docs/agents/execution-chain.md` 入手。
-2. 保持阶段顺序和两个入口，除非任务明确只限定其中一个面。
+2. 旧管线保持阶段顺序和两个入口；新 pipeline 的阶段级 runner 是验证入口，切换前两者并存。
 3. 不要在同一份 checkout 里并发跑流水线。它们共享 `output/` 和 `config.yaml`，而 YAML 锁只在进程内有效。
 4. 新配置键加到 `config.example.yaml`。旧阶段通过 `load_key`/`update_key` 访问；新 pipeline 只通过薄包装读取 `--config`，运行期不写 `config.yaml`。无关工作中不要覆盖本地 `config.yaml`。
 5. 改动保持聚焦。汇报受影响的阶段、验证证据，以及任何未测试的模型、GPU、API 或依赖媒体文件的路径。
