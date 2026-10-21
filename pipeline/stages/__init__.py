@@ -1,0 +1,1 @@
+"""Stage implementations. T1 ships stubs; T3-T8 fill them in."""
