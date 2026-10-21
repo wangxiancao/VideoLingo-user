@@ -134,7 +134,7 @@ $PYTHON -m pipeline.runner --stages transcribe --workdir "$NOMEDIA" --config "$N
 | 输入 | 结果 | 退出码 | 备注 |
 |------|------|--------|------|
 | 30 s zh_30s.wav | 1 segment，110 words，language=zh，0.72–29.921 s | 0 | 9 个零长度单元扩展为 1 ms；总耗时约 12.0 s（含权重解析 1.3 s、加载 7.3 s、ASR 2.1 s、对齐 0.2 s） |
-| 60 s（30 s ×2） | 2 segments，220 words；第二段 30.72–59.921 s | 0 | 块偏移正确；耗时约 12.5 s |
+| 60 s（30 s ×2） | 2 segments，220 words；第二段 30.72–59.921 s | 0 | 块偏移正确；验证实测约 13.8 s |
 | 60 s，batch_size=2 | 2 segments，220 words | 0 | 批量路径正确 |
 | 缺权重（空缓存） | 无 transcript | 1 | `error: stage 'transcribe': model weights for ZhipuAI/GLM-ASR-Nano-2512 are not available ...` |
 | 缺音频 | 无 transcript | 2 | `stage 'transcribe' requires 'audio' ... (produced by 'ingest')` |
@@ -157,22 +157,24 @@ $PYTHON -m pipeline.runner --stages transcribe --workdir "$NOMEDIA" --config "$N
 
 ## 验证记录
 
-```markdown
-## 验证记录
-
 - Ticket: #8
 - Stage: transcribe
 - Implementer: 实现会话
-- Verifier:
-- Commit: 7b1c34c
+- Verifier: 独立验证 agent（未参与实现）
+- Commit: 8288c35（HEAD；实现 7b1c34c）
 - Scope: 30 s / 60 s 音频 → transcript JSON；GLM-ASR + ForcedAligner
-- Preconditions:
-- Config path: 临时复制的 config.example.yaml
-- Fixtures: tests/fixtures/audio/zh_30s.wav；/tmp/zh_60s.wav
-- Command:
-- Expected:
-- Result:
-- Exit code:
-- Evidence:
-- Verdict: PASS / FAIL
-```
+- Preconditions: RTX 3090、旧 venv、ModelScope 缓存、CJK/英文夹具
+- Config path: 临时复制的 `config.example.yaml`
+- Fixtures: `tests/fixtures/audio/zh_30s.wav`；按文档生成的 `/tmp/zh_60s.wav`
+- Command: 见“命令”小节；验证全部写入 `/tmp`，未改仓库
+- Expected: 退出 0；language=zh；词时间戳单调、`end > start`、在 30.5/60.5 s 内；缺权重退出 1；缺音频退出 2
+- Result: PASS
+  - 30 s：退出 0，wall 12.02 s；1 segment 0.72–29.921 s，110 words；9 个零长度单元扩展为 1 ms；无零长度词
+  - 60 s：退出 0，wall 13.76 s；2 segments（0.72–29.921、30.72–59.921），220 words；最大 end 59.921 s
+  - 缺权重：退出 1，stderr 含 `stage 'transcribe'` 与 GLM 模型 ID，无 transcript
+  - 缺音频：退出 2，stderr 指出 stage 与 producer
+  - 测试：52 passed（T1 29 + T2a 6 + T3 4 + T4 13）
+  - 仅运行 transcribe；无下游或全流程；仓库保持干净
+- Exit code: 0（30/60 s）；1（缺权重）；2（缺音频）
+- Evidence: 上述计数/时间范围/耗时；pytest 输出；空缓存错误
+- Verdict: PASS
