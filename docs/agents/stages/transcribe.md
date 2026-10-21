@@ -9,6 +9,7 @@
 - `media/audio.wav` → `transcript.json`。
 - 官方 `ZhipuAI/GLM-ASR-Nano-2512` 转写 + `Qwen/Qwen3-ForcedAligner-0.6B-hf` 词级对齐。
 - 30 秒分块、按配置批量、块偏移合并；当前不做块重叠。
+- 小于 1 秒的尾块并入前一块。AAC 封装常让视频抽出的音频多出十几毫秒；极短尾块会让对齐器产生越界词，必须避免。
 - 每个非静音块生成一个 transcript segment，保留段文本和词级时间戳。
 - 语言：配置显式指定，或从转写文本脚本自动判断（zh/en/ja/ko/ru）。
 
@@ -142,6 +143,25 @@ $PYTHON -m pipeline.runner --stages transcribe --workdir "$NOMEDIA" --config "$N
 - 测试：`52 passed`（T1 29 + T2a 6 + T3 4 + T4 13）。
 - 性能基线仍引用 T2a 报告：30 s 热启动 RTFx 17.32、60 s 16.54、显存峰值 6062/6228 MB、batch 1；T4 不重新调优。
 - 未跑全流程。
+
+## 视频两阶段回归
+
+30 秒语音视频经 `--stages ingest,transcribe`（只跑两阶段，不是全流程）实测：
+
+```bash
+ffmpeg -y -f lavfi -i testsrc2=size=320x240:rate=24 \
+  -i tests/fixtures/audio/zh_30s.wav -t 30 \
+  -c:v libx264 -preset veryfast -pix_fmt yuv420p \
+  -c:a aac -b:a 96k -shortest "$WORK/input/zh_30s.mp4"
+$PYTHON -m pipeline.runner --stages ingest,transcribe \
+  --workdir "$WORK/run" --config "$WORK/config.yaml" \
+  --source "$WORK/input/zh_30s.mp4"
+```
+
+- 退出 0；生成 `media/source.mp4`、`media/audio.wav`、`transcript.json`。
+- AAC 封装后音频为 30.016 s；修复前会切出 16 ms 尾块并因对齐越界失败；修复后只有 1 个块。
+- 结果：language=zh，1 segment，110 words，0.72–30.0 s，时间戳单调且 `end > start`。
+- 该检查只证明视频入口到转写；segment/translate/subtitle/burn 仍是 stub，端到端视频→字幕 MP4 尚未实现。
 
 ## 独立验证
 
