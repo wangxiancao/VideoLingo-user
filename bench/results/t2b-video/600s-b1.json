@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "mode": "hot",
+  "audio": {
+    "path": "/tmp/t2b-video/work_600/media/audio.wav",
+    "duration_s": 600.003625,
+    "sample_rate": 16000,
+    "channels": 1
+  },
+  "config": {
+    "chunk_seconds": 30.0,
+    "batch_size": 1,
+    "language": "English",
+    "max_new_tokens": 512,
+    "warmups": 1,
+    "runs": 2
+  },
+  "environment": {
+    "python": "3.10.19",
+    "torch": "2.11.0+cu129",
+    "transformers": "5.14.1",
+    "modelscope": "1.27.0",
+    "cuda": "12.9",
+    "gpu": {
+      "name": "NVIDIA GeForce RTX 3090",
+      "total_memory_mb": 24132.2
+    }
+  },
+  "models": {
+    "ZhipuAI/GLM-ASR-Nano-2512": {
+      "path": "/root/.cache/modelscope/ZhipuAI/GLM-ASR-Nano-2512",
+      "safetensors_bytes": 4515776712
+    },
+    "Qwen/Qwen3-ForcedAligner-0.6B-hf": {
+      "path": "/root/.cache/modelscope/Qwen/Qwen3-ForcedAligner-0___6B-hf",
+      "safetensors_bytes": 1835545960
+    }
+  },
+  "load_s": 4.048278379952535,
+  "runs": [
+    {
+      "run": 1,
+      "chunks": 20,
+      "words": 1841,
+      "asr_s": 53.1955901379697,
+      "align_s": 1.6591011735145003,
+      "inference_s": 54.85625632596202,
+      "wall_s": 54.856285501038656,
+      "rtfx": 10.937737025388632,
+      "compute_rtfx": 10.937742842579546,
+      "vram_peak_allocated_mb": 6062.0,
+      "vram_peak_reserved_mb": 6236.0
+    },
+    {
+      "run": 2,
+      "chunks": 20,
+      "words": 1841,
+      "asr_s": 52.87816112488508,
+      "align_s": 1.9127302633132786,
+      "inference_s": 54.79248057003133,
+      "wall_s": 54.792523860000074,
+      "rtfx": 10.950465186328419,
+      "compute_rtfx": 10.950473837977162,
+      "vram_peak_allocated_mb": 6062.0,
+      "vram_peak_reserved_mb": 6236.0
+    }
+  ],
+  "summary": {
+    "count": 2,
+    "rtfx_median": 10.944101105858525,
+    "rtfx_min": 10.937737025388632,
+    "rtfx_max": 10.950465186328419,
+    "vram_peak_allocated_mb": 6062.0,
+    "vram_peak_reserved_mb": 6236.0,
+    "words": 1841
+  }
+}

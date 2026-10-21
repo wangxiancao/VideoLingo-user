@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-22",
+  "method": "real video through ingest then transcribe; hot RTFx from bench.asr_rtfx on the extracted 16 kHz audio",
+  "sources": [
+    {
+      "id": "zh_news",
+      "path": "/root/VideoLingo/history/每日必看吳乃仁僅管收12天比教召少陳昭姿誰給台糖壓力請辭了嗎姜至剛耍嘴皮委員心裡答案跟我一樣20260810/每日必看吳乃仁僅管收12天比教召少陳昭姿誰給台糖壓力請辭了嗎姜至剛耍嘴皮委員心裡答案跟我一樣20260810.mp4",
+      "sha256": "9c9418f7b87e25a63d85f95e366316994a622fd19c834aaa4af0b068bc2530c9"
+    },
+    {
+      "id": "pi",
+      "path": "/root/VideoLingo/history/Pi-to-Pi_-Two-Way-Agent-Orchestration-with-the-Pi-Coding-Agent_1080p/Pi-to-Pi_-Two-Way-Agent-Orchestration-with-the-Pi-Coding-Agent_1080p.mp4",
+      "sha256": "abf13e73e7f1b756509d117b01376856eb3aa1d3e11329827ae3189fcb7a334a"
+    }
+  ],
+  "clips": [
+    {
+      "id": "30s",
+      "source": "zh_news",
+      "path": "/tmp/t2b-video/zh_news_30s.mp4",
+      "video_duration_s": 30.14,
+      "sha256": "92185e62a5446c0cd4e5c3bd98aaf039c95e3b20f63b2e9a4625506a05b1d50f"
+    },
+    {
+      "id": "60s",
+      "source": "zh_news",
+      "path": "/tmp/t2b-video/zh_news_60s.mp4",
+      "video_duration_s": 60.14,
+      "sha256": "1679ab34ea1f28f8fa0f862580fa16ba69354c119470a94e650d696bb416264a"
+    },
+    {
+      "id": "600s",
+      "source": "pi",
+      "path": "/tmp/t2b-video/pi_600s.mp4",
+      "video_duration_s": 600.033,
+      "sha256": "1d7659ed7f3f1c78e4877e2613aa18399f8384b4734696d5b8abdd738c1111a9",
+      "note": "re-encoded and scaled to 640x360 so audio/video stay aligned"
+    }
+  ],
+  "chain": [
+    {
+      "clip": "30s",
+      "audio_s": 30.0,
+      "ingest_wall_s": 0.392,
+      "transcribe_wall_s": 11.892,
+      "transcribe_log": {
+        "chunks": 1,
+        "chunk_seconds": 30,
+        "batch_size": 20,
+        "segments": 1,
+        "words": 98,
+        "time_s": 10.63
+      },
+      "language": "zh",
+      "chain_wall_s": 12.284,
+      "cold_chain_rtfx": 2.44
+    },
+    {
+      "clip": "60s",
+      "audio_s": 60.0,
+      "ingest_wall_s": 0.431,
+      "transcribe_wall_s": 12.192,
+      "transcribe_log": {
+        "chunks": 2,
+        "chunk_seconds": 30,
+        "batch_size": 20,
+        "segments": 2,
+        "words": 197,
+        "time_s": 10.94
+      },
+      "language": "zh",
+      "chain_wall_s": 12.623,
+      "cold_chain_rtfx": 4.75
+    },
+    {
+      "clip": "600s",
+      "audio_s": 600.004,
+      "ingest_wall_s": 1.264,
+      "transcribe_wall_s": 15.6,
+      "transcribe_log": {
+        "chunks": 20,
+        "chunk_seconds": 30,
+        "batch_size": 20,
+        "segments": 20,
+        "words": 1839,
+        "time_s": 14.29
+      },
+      "language": "en",
+      "chain_wall_s": 16.864,
+      "cold_chain_rtfx": 35.58
+    }
+  ],
+  "hot_bench": {
+    "30s": {
+      "batch1": {
+        "rtfx": 16.434,
+        "vram_allocated_mb": 6062.5,
+        "vram_reserved_mb": 6296.0,
+        "words": 98
+      },
+      "batch20": {
+        "rtfx": 16.297,
+        "vram_allocated_mb": 6062.5,
+        "vram_reserved_mb": 6296.0,
+        "words": 98
+      }
+    },
+    "60s": {
+      "batch1": {
+        "rtfx": 16.368,
+        "vram_allocated_mb": 6062.0,
+        "vram_reserved_mb": 6228.0,
+        "words": 197
+      },
+      "batch20": {
+        "rtfx": 29.399,
+        "vram_allocated_mb": 6285.5,
+        "vram_reserved_mb": 6688.0,
+        "words": 197
+      }
+    },
+    "600s": {
+      "batch1": {
+        "rtfx": 10.944,
+        "vram_allocated_mb": 6062.0,
+        "vram_reserved_mb": 6236.0,
+        "words": 1841
+      },
+      "batch20": {
+        "rtfx": 106.66,
+        "vram_allocated_mb": 10294.0,
+        "vram_reserved_mb": 13284.0,
+        "words": 1839
+      }
+    }
+  }
+}

@@ -20,7 +20,9 @@ T5 adds `tests/test_t5_segment.py` (2 tests). It uses a fixed transcript and LLM
 
 T6 adds `tests/test_t6_translate.py` (4 tests). It checks two-step exam translation, missing-id failure, cache reuse and batched/concurrent requests.
 
-The full suite currently has **68 tests** (T1 29 + T2a 6 + T3 4 + T4 13 + T2b 2 + tail 3 + T7 3 + T8 2 + T5 2 + T6 4).
+T2b adds `tests/test_t2b_chunk_bounds.py` (2 tests). It checks short-tail merging in the benchmark chunker and clamping of words slightly past a chunk boundary.
+
+The full suite currently has **70 tests** (T1 29 + T2a 6 + T3 4 + T4 13 + T2b 2 + tail 3 + T7 3 + T8 2 + T5 2 + T6 4 + T2b bounds 2). Note: T2b batching has 2 tests and T2b chunk bounds adds 2; the earlier T2b count is part of the total.
 
 Run all from the repo root with the existing dev venv:
 
@@ -31,6 +33,7 @@ Run all from the repo root with the existing dev venv:
   tests/test_t2b_batching.py tests/test_t4_tail_chunks.py \
   tests/test_t7_subtitle.py tests/test_t8_burn.py \
   tests/test_t5_segment.py tests/test_t6_translate.py \
+  tests/test_t2b_chunk_bounds.py \
   -p no:cacheprovider
 ```
 

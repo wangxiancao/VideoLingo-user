@@ -213,8 +213,11 @@ def _clamp_words(timestamps, offset, chunk_duration):
             continue
         start = offset + float(item["start_time"])
         end = offset + float(item["end_time"])
-        if start < offset - 0.05 or start > chunk_end:
+        if start < offset - 0.05 or start > chunk_end + MAX_OVERRUN:
             raise StageError(f"forced aligner word starts outside its chunk: {start:.3f}s")
+        if start > chunk_end:
+            start = max(offset, chunk_end - 0.001)
+            end = chunk_end
         if end < start:
             raise StageError("forced aligner returned end before start")
         if end == start:
