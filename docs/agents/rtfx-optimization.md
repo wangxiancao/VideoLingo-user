@@ -35,7 +35,7 @@
 
 ## 口径
 
-- **热 RTFx** = 音频时长 / 推理耗时；模型已加载，1 次 warmup，2–3 次测量取中位数。不含模型加载与 ModelScope 路径解析。
+- **热 RTFx** = 音频时长 / 推理耗时；模型已加载，1 次 warmup，批量 sweep 2 次测量取中位数、短音频 3 次。不含模型加载与 ModelScope 路径解析。
 - **冷阶段壁钟** = runner 从启动到写完 transcript 的实际时间，包含模型解析、加载和推理。短音频由加载主导，单独报告，不与热 RTFx 混用。
 - 批量与分块通过 `bench.asr_rtfx` 的 `--batch-size`、`--chunk-seconds` 控制；显存取 `torch.cuda.max_memory_allocated()` / `max_memory_reserved()`。
 - GPU 上另有约 9.5 GB 被其它进程占用；显存数字是本进程峰值，不是整卡占用。
@@ -58,7 +58,7 @@ R600 真实 10 分钟，30 秒分块：
 - 480 秒 R480：1→15.31、8→73.69、16→111.11（16 块，batch ≥16 等价）。
 - 60 秒 R60：1→21.97、2→33.70。
 - 30 秒只有 1 块，批量无效：20.09。
-- **相对 T2a 基线**：R600 14.37→120.10（8.36x）；R480 15.31→111.11（7.26x）；S600 16.81→147.95（8.80x）。
+- **相对 batch=1（与 T2a 相同口径）**：R600 14.37→120.10（8.36x）；R480 15.31→111.11（7.26x）；S600 16.81→147.95（8.80x）。S600 的 batch=1 是 T2a 已发布基线；R600/R480 的 batch=1 由 T2b 按同一口径实测。
 
 ## 分块
 
@@ -143,22 +143,26 @@ $PYTHON -m bench.asr_rtfx run \
 
 ## 验证记录
 
-```markdown
-## 验证记录
-
 - Ticket: #5
 - Stage: 性能（非阶段）
 - Implementer: 实现会话
-- Verifier:
-- Commit: a74a3c8
+- Verifier: 独立验证 agent（未参与实现）
+- Commit: 5b1ab64（实现 a74a3c8）
 - Scope: 批量、分块、注意力、对齐分组、流水线重叠、生成上限
-- Preconditions:
-- Config path: 不适用（benchmark CLI）；生产默认见 config.example.yaml
-- Fixtures: S600 可复现；R600 为本地真实音频
-- Command:
-- Expected:
-- Result:
-- Exit code:
-- Evidence:
-- Verdict: PASS / FAIL
-```
+- Preconditions: RTX 3090 24 GB、旧 venv、ModelScope 缓存；GPU 另有约 9.5 GB 占用
+- Config path: 不适用（benchmark CLI）；生产默认 `config.example.yaml`
+- Fixtures: S600 由已提交夹具生成；R600 本地真实音频（源 SHA-256 已记录）
+- Command: 见“复跑”小节；验证写入 `/tmp`
+- Expected: S600 b1≈16.81、b20≈147.95；R600 b20≈120.10；生产默认 batch20；54 tests
+- Result: PASS
+  - S600 b1：16.98（+1.0%），6062/6228 MB，2200 words
+  - S600 b20：152.05（+2.8%），10293/13224 MB，2200 words
+  - R600 b20：121.89（+1.5%），10300/13224 MB，2695 words
+  - 生产 stage：exit 0，wall 15.08 s；日志 `chunks=20 chunk_seconds=30 batch_size=20 segments=20 words=2695`；language=zh；时间戳单调、`end > start`、0–599.920 s；只写 transcript.json
+  - 默认 batch=20；OOM 8→4→2 回退单测通过；报告表与证据 JSON 一致
+  - 54 tests passed；无下游或全流程；仓库未修改
+- Exit code: 0
+- Evidence: 上述 RTFx/显存/日志；`bench/results/t2b/`
+- Verdict: PASS
+
+验证备注：20 RTFx 未被当作验收线；通过依据是真实测试集上的相对提升与绝对吞吐。
