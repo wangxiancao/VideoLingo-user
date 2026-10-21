@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "mode": "hot",
+  "audio": {
+    "path": "/tmp/t2a-audio/zh_60s.wav",
+    "duration_s": 60.0,
+    "sample_rate": 16000,
+    "channels": 1
+  },
+  "config": {
+    "chunk_seconds": 30.0,
+    "batch_size": 1,
+    "language": "Chinese",
+    "max_new_tokens": 512,
+    "warmups": 1,
+    "runs": 3
+  },
+  "environment": {
+    "python": "3.10.19",
+    "torch": "2.11.0+cu129",
+    "transformers": "5.14.1",
+    "modelscope": "1.27.0",
+    "cuda": "12.9",
+    "gpu": {
+      "name": "NVIDIA GeForce RTX 3090",
+      "total_memory_mb": 24132.2
+    }
+  },
+  "models": {
+    "ZhipuAI/GLM-ASR-Nano-2512": {
+      "path": "/root/.cache/modelscope/ZhipuAI/GLM-ASR-Nano-2512",
+      "safetensors_bytes": 4515776712
+    },
+    "Qwen/Qwen3-ForcedAligner-0.6B-hf": {
+      "path": "/root/.cache/modelscope/Qwen/Qwen3-ForcedAligner-0___6B-hf",
+      "safetensors_bytes": 1835545960
+    }
+  },
+  "load_s": 4.056693671038374,
+  "runs": [
+    {
+      "run": 1,
+      "chunks": 2,
+      "words": 220,
+      "asr_s": 3.334018450928852,
+      "align_s": 0.29286516783759,
+      "inference_s": 3.627049612114206,
+      "wall_s": 3.627067483961582,
+      "rtfx": 16.54228940192377,
+      "compute_rtfx": 16.542370912049925,
+      "vram_peak_allocated_mb": 6062.0,
+      "vram_peak_reserved_mb": 6228.0
+    },
+    {
+      "run": 2,
+      "chunks": 2,
+      "words": 220,
+      "asr_s": 3.4539150141645223,
+      "align_s": 0.22826028079725802,
+      "inference_s": 3.6823425479233265,
+      "wall_s": 3.6823629348073155,
+      "rtfx": 16.29388549207184,
+      "compute_rtfx": 16.29397570137446,
+      "vram_peak_allocated_mb": 6062.0,
+      "vram_peak_reserved_mb": 6228.0
+    },
+    {
+      "run": 3,
+      "chunks": 2,
+      "words": 220,
+      "asr_s": 3.3130002801772207,
+      "align_s": 0.13832282088696957,
+      "inference_s": 3.451486217789352,
+      "wall_s": 3.451507706893608,
+      "rtfx": 17.383707381027584,
+      "compute_rtfx": 17.383815612750585,
+      "vram_peak_allocated_mb": 6062.0,
+      "vram_peak_reserved_mb": 6228.0
+    }
+  ],
+  "summary": {
+    "count": 3,
+    "rtfx_median": 16.54228940192377,
+    "rtfx_min": 16.29388549207184,
+    "rtfx_max": 17.383707381027584,
+    "vram_peak_allocated_mb": 6062.0,
+    "vram_peak_reserved_mb": 6228.0,
+    "words": 220
+  }
+}
