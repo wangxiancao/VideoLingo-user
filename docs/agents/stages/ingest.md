@@ -118,7 +118,7 @@ $PYTHON -m pipeline.runner --stages ingest --workdir "$WORK/fail2" \
 
 - 无音轨错误：`error: stage 'ingest': source has no audio stream: ...`
 - 不支持 scheme 错误：`error: stage 'ingest': unsupported source URL scheme: ftp`
-- 测试：`39 passed`（T1 29 + T2a 6 + T3 4）。
+- 测试：T3 验证时 `39 passed`（T1 29 + T2a 6 + T3 4）；当前全套 57。
 - 远程 YouTube / 外网 URL 未验证；本地 HTTP URL 已验证下载路径。
 
 ## 独立验证
@@ -149,7 +149,7 @@ $PYTHON -m pipeline.runner --stages ingest --workdir "$WORK/fail2" \
   - URL：退出 0（1.13 s），与本地产物 SHA-256 一致；服务器日志确认 yt-dlp 发起请求
   - 无音轨：退出 1，stderr 为 `error: stage 'ingest': source has no audio stream: ...`，无产物
   - `ftp://`：退出 2，stderr 含 `stage 'ingest'` 与 `unsupported source URL scheme`
-  - 测试：39 passed（T1 29 + T2a 6 + T3 4）
+  - 测试：T3 验证时 39 passed（T1 29 + T2a 6 + T3 4）；当前全套 57
   - 未调用 demucs，未跑下游阶段或全流程；验证未修改仓库
 - Exit code: 0（成功）；1（无音轨）；2（不支持的 scheme）
 - Evidence: 上述尺寸/时长/哈希；本地 HTTP 服务日志；pytest 输出

@@ -140,7 +140,7 @@ $PYTHON -m pipeline.runner --stages transcribe --workdir "$NOMEDIA" --config "$N
 | 缺权重（空缓存） | 无 transcript | 1 | `error: stage 'transcribe': model weights for ZhipuAI/GLM-ASR-Nano-2512 are not available ...` |
 | 缺音频 | 无 transcript | 2 | `stage 'transcribe' requires 'audio' ... (produced by 'ingest')` |
 
-- 测试：`52 passed`（T1 29 + T2a 6 + T3 4 + T4 13）。
+- 测试：当前全套 `57 passed`（T1 29 + T2a 6 + T3 4 + T4 13 + T2b 2 + tail 3）。
 - 上表 30/60 s 数据采集于 T4 的 batch=1；T2b 将默认批量改为 20 并加入 OOM 减半，阶段契约不变，性能见 `docs/agents/rtfx-optimization.md`。
 - 性能基线仍引用 T2a 报告：30 s 热启动 RTFx 17.32、60 s 16.54、显存峰值 6062/6228 MB、batch 1；T4 不重新调优。
 - 未跑全流程。
@@ -164,7 +164,7 @@ $PYTHON -m pipeline.runner --stages ingest,transcribe \
 - 结果：language=zh，1 segment，110 words，0.72–30.0 s，时间戳单调且 `end > start`。
 - 该检查只证明视频入口到转写；segment/translate/subtitle/burn 仍是 stub，端到端视频→字幕 MP4 尚未实现。
 
-独立验证（2026-10-21，未参与实现的 agent）：PASS。55 tests；视频两阶段退出 0；audio.wav 30.016 s 且只切 1 块；transcript language=zh、1 segment、110 words、0.72–30.0 s；时间戳单调且 `end > start`；仓库未修改。
+独立验证（2026-10-21，未参与实现的 agent）：PASS。修复验证时为 55 tests；合并 T2b 后当前全套 57 tests。视频两阶段退出 0；audio.wav 30.016 s 且只切 1 块；transcript language=zh、1 segment、110 words、0.72–30.0 s；时间戳单调且 `end > start`；仓库未修改。
 
 ## 独立验证
 
@@ -174,7 +174,7 @@ $PYTHON -m pipeline.runner --stages ingest,transcribe \
 2. 60 秒夹具检查两块与第二块约 30 秒的偏移。
 3. 空缓存配置运行，确认退出 1、stderr 含 `stage 'transcribe'` 与模型 ID、无 transcript。
 4. 缺音频运行，确认退出 2。
-5. 跑 `pytest` 四个测试文件，确认 52 passed。
+5. 跑 `pytest` 六个测试文件，确认当前全套 57 passed。
 6. 确认没有跑下游阶段或全流程。
 7. 若 GPU、权重或依赖不可用，标记为“未验证”，不要猜 PASS。
 
@@ -196,7 +196,7 @@ $PYTHON -m pipeline.runner --stages ingest,transcribe \
   - 60 s：退出 0，wall 13.76 s；2 segments（0.72–29.921、30.72–59.921），220 words；最大 end 59.921 s
   - 缺权重：退出 1，stderr 含 `stage 'transcribe'` 与 GLM 模型 ID，无 transcript
   - 缺音频：退出 2，stderr 指出 stage 与 producer
-  - 测试：52 passed（T1 29 + T2a 6 + T3 4 + T4 13）
+  - 测试：T4 验证时 52 passed；当前全套 57（新增 T2b 2 + tail 3）
   - 仅运行 transcribe；无下游或全流程；仓库保持干净
 - Exit code: 0（30/60 s）；1（缺权重）；2（缺音频）
 - Evidence: 上述计数/时间范围/耗时；pytest 输出；空缓存错误

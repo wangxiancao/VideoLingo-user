@@ -10,13 +10,17 @@ T4 adds `tests/test_t4_transcribe.py` (13 tests). It uses a fake ASR backend for
 
 T2b adds `tests/test_t2b_batching.py` (2 tests). It checks the default batch size and the CUDA-OOM halving path with a fake batch function.
 
+The tail-chunk fix adds `tests/test_t4_tail_chunks.py` (3 tests). It checks that a final chunk shorter than 1 s is merged into the previous chunk while exact 30/60 s chunking is unchanged.
+
+The full suite currently has **57 tests** (T1 29 + T2a 6 + T3 4 + T4 13 + T2b 2 + tail 3).
+
 Run all from the repo root with the existing dev venv:
 
 ```bash
 /root/VideoLingo/.venv/bin/python -m pytest -q \
   tests/test_t1_runner.py tests/test_t2a_rtfx.py \
   tests/test_t3_ingest.py tests/test_t4_transcribe.py \
-  tests/test_t2b_batching.py \
+  tests/test_t2b_batching.py tests/test_t4_tail_chunks.py \
   -p no:cacheprovider
 ```
 
