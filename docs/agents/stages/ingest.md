@@ -133,22 +133,24 @@ $PYTHON -m pipeline.runner --stages ingest --workdir "$WORK/fail2" \
 
 ## 验证记录
 
-```markdown
-## 验证记录
-
 - Ticket: #7
 - Stage: ingest
 - Implementer: 实现会话
-- Verifier:
-- Commit: c3ad043
+- Verifier: 独立验证 agent（未参与实现）
+- Commit: ddec6df（HEAD；实现 c3ad043）
 - Scope: 本地文件 + URL → 规范化视频与 16k mono 音频
-- Preconditions:
-- Config path: 临时复制的 config.example.yaml
-- Fixtures: tests/fixtures/video/sample_5s.mp4
-- Command:
-- Expected:
-- Result:
-- Exit code:
-- Evidence:
-- Verdict: PASS / FAIL
-```
+- Preconditions: Python 3.10.19、FFmpeg 4.2.7、yt-dlp 2026.07.04、无 GPU/模型
+- Config path: 临时复制的 `config.example.yaml`
+- Fixtures: `tests/fixtures/video/sample_5s.mp4`
+- Command: 见“命令”小节的本地、localhost URL 与两个失败路径
+- Expected: 退出 0；两个产物存在；16 kHz mono 16-bit；时长差 ≤0.5 s；失败退出非零并含 `stage 'ingest'`
+- Result: PASS
+  - 本地：退出 0（0.33 s），source.mp4 225,831 B / 5.022 s，audio.wav 160,504 B / 5.013 s，1 ch / 16000 Hz / 16-bit；无 `.ingest-*`
+  - URL：退出 0（1.13 s），与本地产物 SHA-256 一致；服务器日志确认 yt-dlp 发起请求
+  - 无音轨：退出 1，stderr 为 `error: stage 'ingest': source has no audio stream: ...`，无产物
+  - `ftp://`：退出 2，stderr 含 `stage 'ingest'` 与 `unsupported source URL scheme`
+  - 测试：39 passed（T1 29 + T2a 6 + T3 4）
+  - 未调用 demucs，未跑下游阶段或全流程；验证未修改仓库
+- Exit code: 0（成功）；1（无音轨）；2（不支持的 scheme）
+- Evidence: 上述尺寸/时长/哈希；本地 HTTP 服务日志；pytest 输出
+- Verdict: PASS
