@@ -11,6 +11,7 @@ SAMPLE_RATE = 16000
 GLM_MODEL_ID = "ZhipuAI/GLM-ASR-Nano-2512"
 ALIGNER_MODEL_ID = "Qwen/Qwen3-ForcedAligner-0.6B-hf"
 MAX_OVERRUN = 0.5
+MIN_TAIL_SECONDS = 1.0
 
 
 @dataclass
@@ -123,7 +124,13 @@ def _chunks(samples, sample_rate, chunk_seconds):
     chunk_size = int(round(sample_rate * chunk_seconds))
     if chunk_size <= 0:
         raise StageError("asr.chunk_seconds must be positive")
-    return [samples[index : index + chunk_size] for index in range(0, len(samples), chunk_size)]
+    chunks = [samples[index : index + chunk_size] for index in range(0, len(samples), chunk_size)]
+    min_tail = int(round(sample_rate * MIN_TAIL_SECONDS))
+    if len(chunks) > 1 and len(chunks[-1]) < min_tail:
+        start = (len(chunks) - 2) * chunk_size
+        chunks[-2] = samples[start:]
+        chunks.pop()
+    return chunks
 
 
 def _batches(items, batch_size):
