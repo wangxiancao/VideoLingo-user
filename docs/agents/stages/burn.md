@@ -2,7 +2,7 @@
 
 ## 范围
 
-关联：Epic #1；T8 #12；spec #16；实现 commit 待填。
+关联：Epic #1；T8 #12；spec #16；实现 commit `4bcbeea`。
 
 本阶段负责：
 
@@ -88,22 +88,22 @@ ffmpeg -y -v error -ss 1.5 -i "$WORK/output.mp4" -frames:v 1 "$WORK/frame.png"
 
 ## 验证记录
 
-```markdown
-## 验证记录
-
 - Ticket: #12
 - Stage: burn
 - Implementer: 实现会话
-- Verifier:
-- Commit:
+- Verifier: 独立验证 agent（未参与实现）
+- Commit: 4bcbeea
 - Scope: source.mp4 + target.srt → output.mp4
-- Preconditions:
-- Config path:
-- Fixtures:
-- Command:
-- Expected:
-- Result:
-- Exit code:
-- Evidence:
-- Verdict: PASS / FAIL
-```
+- Preconditions: FFmpeg 4.2.7、Noto Sans CJK SC、无 GPU/模型
+- Config path: 临时复制的 `config.example.yaml`
+- Fixtures: `sample_5s.mp4`、`sample_5s_source.srt`、`sample_5s_target.srt`
+- Command: 见“命令”小节；验证写入 `/tmp`
+- Expected: 退出 0；output.mp4 含音视频流、时长差 ≤0.5 s；中文可见；坏源退出 1 且无输出
+- Result: PASS
+  - output.mp4 5.022 s（与源差 0.0）；H.264 320x240 + AAC
+  - 1.5 s 抽帧可见“中文字幕渲染测试”，CJK 正常、无方块
+  - 损坏源：退出 1，stderr 含 `stage 'burn'` 与 ffprobe 错误，无 output/temp
+  - 仅跑 burn；62 tests passed；仓库未修改
+- Exit code: 0（正常）；1（损坏源）
+- Evidence: 上述流/时长/抽帧；验证输出在 `/tmp`
+- Verdict: PASS
