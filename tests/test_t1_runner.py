@@ -9,7 +9,7 @@ import pytest
 
 from pipeline.codec import JsonCodec
 from pipeline.config import ReadOnlyConfig
-from pipeline.contracts import ContractError, StageContext, StageSpec
+from pipeline.contracts import ContractError, StageContext, StageError, StageSpec
 from pipeline.registry import ARTIFACTS, STAGES, validate_registry
 from pipeline.runner import run
 from pipeline.validators import validate_artifact, validate_srt_set
@@ -212,6 +212,7 @@ def test_stage_failure_returns_1_and_names_stage(tmp_path, capsys):
     cases = (
         ("bad_runtime", RuntimeError, "boom"),
         ("bad_contract", ContractError, "bad input"),
+        ("bad_stage", StageError, "stage-specific failure"),
     )
     for stage_id, exc, message in cases:
         def fail(_ctx, _exc=exc, _message=message):
@@ -226,13 +227,15 @@ def test_stage_failure_returns_1_and_names_stage(tmp_path, capsys):
 
 def test_stub_not_implemented_returns_1(tmp_path, capsys):
     config = _write_config(tmp_path)
-    assert run(
-        "ingest",
-        tmp_path / "work",
-        config,
-        source="http://example.com/a.mp4",
-    ) == 1
-    assert "ingest" in capsys.readouterr().err
+
+    def stub(_ctx):
+        raise NotImplementedError("later ticket")
+
+    stage = StageSpec("stub", "stub", (), (), (), stub)
+    assert run("stub", tmp_path / "work", config, stages=(stage,)) == 1
+    error = capsys.readouterr().err
+    assert "stub" in error
+    assert "not implemented" in error
 
 
 def test_validate_only_does_not_execute(tmp_path):

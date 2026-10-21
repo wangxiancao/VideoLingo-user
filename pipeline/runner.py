@@ -120,8 +120,8 @@ def _run_stage(
         stage.run(ctx)
     except NotImplementedError as exc:
         raise StageError(f"stage '{stage.id}' is not implemented: {exc}") from exc
-    except StageError:
-        raise
+    except StageError as exc:
+        raise StageError(f"stage '{stage.id}': {exc}") from exc
     except PipelineError as exc:
         raise type(exc)(f"stage '{stage.id}': {exc}") from exc
     except Exception as exc:
