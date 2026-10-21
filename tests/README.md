@@ -14,7 +14,9 @@ The tail-chunk fix adds `tests/test_t4_tail_chunks.py` (3 tests). It checks that
 
 T7 adds `tests/test_t7_subtitle.py` (3 tests). It checks three consistent SRTs, display-length splitting, bilingual two-line output and the validation failure path.
 
-The full suite currently has **60 tests** (T1 29 + T2a 6 + T3 4 + T4 13 + T2b 2 + tail 3 + T7 3).
+T8 adds `tests/test_t8_burn.py` (2 tests). It checks a burned MP4 with video+audio and duration drift ≤0.5 s, plus explicit failure on a corrupt source without output.
+
+The full suite currently has **62 tests** (T1 29 + T2a 6 + T3 4 + T4 13 + T2b 2 + tail 3 + T7 3 + T8 2).
 
 Run all from the repo root with the existing dev venv:
 
@@ -23,7 +25,7 @@ Run all from the repo root with the existing dev venv:
   tests/test_t1_runner.py tests/test_t2a_rtfx.py \
   tests/test_t3_ingest.py tests/test_t4_transcribe.py \
   tests/test_t2b_batching.py tests/test_t4_tail_chunks.py \
-  tests/test_t7_subtitle.py \
+  tests/test_t7_subtitle.py tests/test_t8_burn.py \
   -p no:cacheprovider
 ```
 
