@@ -2,7 +2,7 @@
 
 ## 范围
 
-关联：Epic #1；T6 #10；spec #16；实现 commit 待填。
+关联：Epic #1；T6 #10；spec #16；实现 commit `bedad1c`。
 
 本阶段负责：
 
@@ -98,22 +98,24 @@ find "$WORK" -maxdepth 2 -type f -printf '%P\n' | sort
 
 ## 验证记录
 
-```markdown
-## 验证记录
-
 - Ticket: #10
 - Stage: translate
 - Implementer: 实现会话
-- Verifier:
-- Commit:
+- Verifier: 独立验证 agent（未参与实现）
+- Commit: bedad1c
 - Scope: segments.json → translation.json（两步翻译，考题夹具）
-- Preconditions:
-- Config path:
-- Fixtures:
-- Command:
-- Expected:
-- Result:
-- Exit code:
-- Evidence:
-- Verdict: PASS / FAIL
-```
+- Preconditions: 无 GPU/网络/API key；fixture client
+- Config path: 临时复制的 `config.example.yaml`
+- Fixtures: segments/sample_6s.json；translate_exam.json、translate_exam_missing.json
+- Command: 见“命令”小节；验证写入 `/tmp`
+- Expected: 2 段、target en→简体中文、时间戳不变、第二步译文；缓存命中；缺 id 退出 1
+- Result: PASS
+  - 2 段；id 1/2；时间 0.5–4.0 / 4.0–6.0；target 为第二步意译答案
+  - `.llm-cache/` 2 个响应；第二次运行输出不变且无新调用（poison 响应测试也确认未调用）
+  - 缺 id：退出 1，`missing translation id(s): [2]`，无 translation.json
+  - fixture client，无网络/OpenAI 导入/密钥访问；只跑 translate
+  - 68 tests passed（含缓存与 9 段 batch=2 并发）；仓库未修改
+- Exit code: 0（正常）；1（缺 id）
+- Evidence: 上述译文/时间/缓存；验证输出在 `/tmp`
+- Verdict: PASS
+- 备注：真实 LLM 质量与真实 API 路径未验证；仅验证结构、时间戳、两步、缓存/并发与失败行为。
