@@ -19,13 +19,13 @@ VideoLingo 是一个的视频转录、翻译、字幕与配音应用。Streamlit
 1. 改动产物路径、表格列、时间戳、排序规则或函数签名之前，先追清它的生产者与消费者；从 `docs/agents/execution-chain.md` 入手。
 2. 保持阶段顺序和两个入口，除非任务明确只限定其中一个面。
 3. 不要在同一份 checkout 里并发跑流水线。它们共享 `output/` 和 `config.yaml`，而 YAML 锁只在进程内有效。
-4. 新配置键加到 `config.example.yaml`，并通过 `load_key`/`update_key` 访问。无关工作中不要覆盖本地 `config.yaml`。
+4. 新配置键加到 `config.example.yaml`。旧阶段通过 `load_key`/`update_key` 访问；新 pipeline 只通过薄包装读取 `--config`，运行期不写 `config.yaml`。无关工作中不要覆盖本地 `config.yaml`。
 5. 改动保持聚焦。汇报受影响的阶段、验证证据，以及任何未测试的模型、GPU、API 或依赖媒体文件的路径。
 6. 所有改动走 feature 分支 + PR；`main` 受保护，不直推。
 
 ## 编码准则
 
-- LLM 调用一律走 `core/utils/ask_gpt.py`；配置访问留在 `core/utils/config_utils.py`。
+- 旧阶段的 LLM 调用走 `core/utils/ask_gpt.py`；新 pipeline 使用新写的薄客户端（`ask_gpt` 只作行为参考）。旧阶段的配置访问留在 `core/utils/config_utils.py`；新 pipeline 通过薄包装支持只读的显式 `--config` 路径。
 - 把中间路径、表格 schema、SRT 顺序和时间戳格式当作 API 对待。保留有序的 Whisper 词级时间戳；对齐必须保持顺序进行，并在匹配不完美的情况下尽力而为（best-effort）。
 - 字幕产物要区分开：阶段 6 用阶段 5 的 split 产物做展示，用它的 remerged 产物做配音。
 - 新增 UI 文案时更新全部 7 份 locale JSON，并保持它们的键集合对齐。
@@ -33,7 +33,7 @@ VideoLingo 是一个的视频转录、翻译、字幕与配音应用。Streamlit
 
 ## 测试说明
 
-仓库当前没有测试套件，也没有 CI workflow——`tests/` 已随 IndexTTS2/CosyVoice3 一并删除。可行时为确定性解析、对齐、配置或计时逻辑补聚焦测试。
+仓库没有测试套件，也没有 CI workflow——旧的 `tests/` 测试套件已随 IndexTTS2/CosyVoice3 删除，当前只有 `tests/fixtures/` 的夹具约定。重构期间按 `docs/agents/verification.md` 做阶段级验证；下面的 CLI/Streamlit 全流程命令只适用于旧管线或切换后的最终验收。可行时为确定性解析、对齐、配置或计时逻辑补聚焦测试。
 
 - Python：`.venv/bin/python -m compileall -q core st.py translate_video.py`
 - 字幕流水线：`.venv/bin/python translate_video.py <disposable-sample>`
@@ -63,7 +63,7 @@ CLI 在处理前会递归替换 `output/`。其他入口路径在哨兵产物存
 
 - Whisper 是唯一已实现的 ASR 路径，但 `requirements.txt`、translations 和 `docs/` 的部分内容仍提到 Qwen3-ASR；以当前代码和 `config.example.yaml` 为准。`qwen-asr` 仍是过期依赖。
 - `setup.py` 发现不到 `VideoLingo` 包，且排除了真正的 `core` 包；可编辑执行目前依赖仓库根目录。
-- 配音能力已归零。IndexTTS2 与 CosyVoice3 后端、`scripts/` 下的 worker、`tests/` 和 `external/index-tts` submodule 都已删除，只剩 `core/tts_backend/custom_tts.py` 这个空实现（函数体是 `pass`，不落盘）。因此 `--mode tts` 会在阶段 10 重试 3 次后抛 `Failed to generate audio`，除非先实现 `custom_tts`。`tts_method` 只接受 `'custom_tts'`，其它值在 `tts_main` 入口直接抛 `ValueError`。
+- 配音能力已归零。IndexTTS2 与 CosyVoice3 后端、`scripts/` 下的 worker、旧 `tests/` 测试套件和 `external/index-tts` submodule 都已删除，只剩 `core/tts_backend/custom_tts.py` 这个空实现（函数体是 `pass`，不落盘）。因此 `--mode tts` 会在阶段 10 重试 3 次后抛 `Failed to generate audio`，除非先实现 `custom_tts`。`tts_method` 只接受 `'custom_tts'`，其它值在 `tts_main` 入口直接抛 `ValueError`。
 - `pause_before_translate` 用终端 `input()`，会阻塞 Streamlit。`burn_subtitles: false` 时，视频产物是黑色占位画面而不是原视频。
 - 完整验证可能需要网络访问、下载、凭据、FFmpeg、可观的 GPU 显存，以及一个真实媒体样本。
 
@@ -80,3 +80,7 @@ Issue 和 spec 在 GitHub Issues（`wangxiancao/VideoLingo-user`）；用 `gh is
 ### 领域文档
 
 单上下文：仓库根一份 `GLOSSARY.md` 加 `docs/adr/`。见 `docs/agents/domain.md`。
+
+### 验证
+
+阶段级验证按 `docs/agents/verification.md`；工具层复用判定见 `docs/agents/tool-audit.md`；夹具约定见 `tests/fixtures/README.md`。
