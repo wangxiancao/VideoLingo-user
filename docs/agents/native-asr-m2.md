@@ -83,3 +83,24 @@ PYTHONPATH=. .venv/bin/python bench/native_asr_e2e.py --video <x.mp4> \
 2. 处置③（RTX 5090）：同命令重跑，GEMM 地板按算力下移，原 540 大概率达成；
 3. 引擎接回流水线（阶段级 runner 的 ASR 后端接缝 + transformers 回退）——
    E2E 验收器已证明全部组件可协作，正式接线为纯工程。
+
+
+## 5. FA2-v3 实现交接清单（冲 12 s/300 的唯一剩余杠杆）
+
+两版 wmma flash（v1 在线 softmax、v2 两遍免缩放）数值均正确（token-identical）
+但比物化路径慢 2.5-3.1×（871/712 vs 280 ms/组）。根因分析与第三版清单：
+
+1. **瓦片**：Br=128×Bc=32（v1/v2 用 64×64——每块计算量不足，占用率 1-2 块/SM
+   且 softmax 段每 warp 仅 16 lane 活跃）。目标 4 warp/块、每 warp 32 行。
+2. **O 驻留寄存器 + FA2 行级重缩放**：wmma m16n16k16 的 fp32 C fragment
+   布局（sm_80+）每 lane 持 8 元素、行号 = lane/4 与 lane/4+8——行最大值与
+   correction 缩放可在 fragment 内完成，**免除 v1/v2 的 S/P 共享内存往返**
+   （这是两版慢的主因：每 K 瓦片 24KB smem 写读）。
+3. **K/V 双缓冲**（cp.async）隐藏 HBM 载入；Q 常驻 smem。
+4. **目标账**：encoder attention 4.2 s → 计算地板 ~0.9 s + 流量地板（scores
+   不再落盘，~15 GB vs 345 GB）≈ **1.0-1.5 s**；总 13.5 → **~10.7-11.2 s**，
+   12 s 门内有 ~10% 余量。
+5. **门**：distinct-4 逐块一致 + Q3 CER ≥99%（近平局按 #37 Q3 口径）+ bench。
+   物化路径保留为回退（`M2_ATTN=flash` 开关已有）。
+
+失败即回退：验收包在 13600 ms 门限（266 RTFx）已 PASS，随时可交付。
