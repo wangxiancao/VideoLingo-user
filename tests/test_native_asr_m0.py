@@ -101,7 +101,9 @@ def test_device_load_matches_numpy_reference():
     for name in sample_names(reference):
         assert produced[name] == reference[name], name
     assert report["vram"]["budget_bytes"] == 16384 * 1024 * 1024
-    assert report["vram"]["weights_device_bytes"] == report["fp16_bytes"]
+    # the arena adds bounded 256-byte alignment padding per tensor (745 * 128B)
+    assert report["fp16_bytes"] <= report["vram"]["weights_device_bytes"]
+    assert report["vram"]["weights_device_bytes"] - report["fp16_bytes"] < 1 << 20
     # weights + largest staging tensor only, far below the 16 GiB budget
     assert report["vram"]["peak_device_bytes"] < 8 * 1024**3
     assert report["bf16_to_fp16"]["overflow_count"] == 0
