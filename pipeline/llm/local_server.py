@@ -104,7 +104,9 @@ def create_app():
         )
         inputs = TOKENIZER(prompt, return_tensors="pt").to(MODEL.device)
         prompt_tokens = int(inputs.input_ids.shape[1])
-        max_new_tokens = request.max_tokens or 1024
+        # 1024 truncated 12-segment batches in the V4-1 spike; 2048 covers
+        # the longest subtitle batches with margin.
+        max_new_tokens = request.max_tokens or 2048
         started = time.perf_counter()
         with generate_lock, torch.inference_mode():
             output = MODEL.generate(

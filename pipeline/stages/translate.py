@@ -7,14 +7,25 @@ from pipeline.llm.cache import ResponseCache, cache_key
 from pipeline.llm.contracts import LlmError
 from pipeline.llm.factory import create_llm_client
 
+# Example-anchored prompts (V4-1 spike validated): HY-MT2-1.8B puts the
+# translation inside "target" only when shown a filled example; the original
+# wording made zh->en invent extra keys with empty targets deterministically.
 SYSTEM_FAITHFUL = (
-    "You translate subtitle segments faithfully into the target language. "
-    "Return JSON only: {\"translations\":[{\"id\":1,\"target\":\"...\"}]}. "
-    "Preserve names, numbers and meaning; do not add explanations."
+    "You translate subtitle segments faithfully into the target language. Output "
+    'ONLY a JSON object: {"translations":[{"id":<integer>,"target":"<translation '
+    'string>"}, ...]} with one entry per input id, the full translation inside '
+    '"target", and no additional keys. Example input {"segments":[{"id":1,'
+    '"text":"你好世界"}]} -> example output {"translations":[{"id":1,"target":'
+    '"Hello world."}]}. Preserve names, numbers and meaning.'
 )
 SYSTEM_REFINE = (
-    "You refine subtitle translations for natural, fluent target-language speech. "
-    "Do not add facts or explanations. Return JSON only in the same shape, with every id."
+    "You refine subtitle translations for natural, fluent target-language "
+    'speech. Output ONLY a JSON object: {"translations":[{"id":<integer>,'
+    '"target":"<refined translation string>"}, ...]} with one entry per input '
+    'id, the full refined translation inside "target", and no additional keys. '
+    'Example input {"segments":[{"id":1,"source":"Hello world.","draft":'
+    '"你好世界。"}]} -> example output {"translations":[{"id":1,"target":'
+    '"你好，世界。"}]}. Do not add facts or explanations; keep every id.'
 )
 
 
@@ -92,23 +103,77 @@ def _complete(client, cache, system, user):
     return response
 
 
-def _translate_batch(client, cache, segments, source_language, target_language):
+def _call_and_parse(client, cache, system, user, expected_ids):
+    """One LLM round with a single retry on contract failure.
+
+    The V4-1 spike saw HY-MT2 drop trailing ids on fragmented batches; a
+    fresh greedy call usually heals it. The failed response is cached before
+    parsing, so evict it before retrying.
+    """
+    raw = _complete(client, cache, system, user)
+    try:
+        return _parse_translations(raw, expected_ids)
+    except StageError:
+        if cache is not None:
+            cache.delete(cache_key(system, user))
+        raw = _complete(client, cache, system, user)
+        return _parse_translations(raw, expected_ids)
+
+
+def _apply_term_map(text, term_map):
+    """Normalize known ASR garbles before the text reaches the LLM.
+
+    Only the request payload is normalized; the stored source text keeps the
+    raw transcript.
+    """
+    if not term_map:
+        return text
+    for wrong, right in sorted(term_map.items(), key=lambda item: -len(item[0])):
+        text = text.replace(str(wrong), str(right))
+    return text
+
+
+def _translate_batch(client, cache, segments, source_language, target_language,
+                     term_map):
+    """Translate one batch, escalating on contract failures.
+
+    A same-batch retry heals stochastic misses; deterministic id drops
+    (seen on the real 60-min run: id 32 dropped twice at batch 8) heal when
+    the batch is bisected, so split and recurse before giving up.
+    """
+    try:
+        return _translate_batch_once(
+            client, cache, segments, source_language, target_language, term_map
+        )
+    except StageError:
+        if len(segments) == 1:
+            raise
+        middle = len(segments) // 2
+        return (
+            _translate_batch(client, cache, segments[:middle],
+                             source_language, target_language, term_map)
+            + _translate_batch(client, cache, segments[middle:],
+                               source_language, target_language, term_map)
+        )
+
+
+def _translate_batch_once(client, cache, segments, source_language,
+                          target_language, term_map):
     ids = [segment["id"] for segment in segments]
     faithful_request = {
         "source_language": source_language,
         "target_language": target_language,
         "segments": [
-            {"id": segment["id"], "text": segment["text"]} for segment in segments
+            {"id": segment["id"],
+             "text": _apply_term_map(segment["text"], term_map)}
+            for segment in segments
         ],
     }
     try:
-        faithful_raw = _complete(
-            client,
-            cache,
-            SYSTEM_FAITHFUL,
-            json.dumps(faithful_request, ensure_ascii=False),
+        drafts = _call_and_parse(
+            client, cache, SYSTEM_FAITHFUL,
+            json.dumps(faithful_request, ensure_ascii=False), ids,
         )
-        drafts = _parse_translations(faithful_raw, ids)
 
         refine_request = {
             "source_language": source_language,
@@ -116,19 +181,16 @@ def _translate_batch(client, cache, segments, source_language, target_language):
             "segments": [
                 {
                     "id": segment["id"],
-                    "source": segment["text"],
+                    "source": _apply_term_map(segment["text"], term_map),
                     "draft": drafts[segment["id"]],
                 }
                 for segment in segments
             ],
         }
-        refined_raw = _complete(
-            client,
-            cache,
-            SYSTEM_REFINE,
-            json.dumps(refine_request, ensure_ascii=False),
+        refined = _call_and_parse(
+            client, cache, SYSTEM_REFINE,
+            json.dumps(refine_request, ensure_ascii=False), ids,
         )
-        refined = _parse_translations(refined_raw, ids)
     except LlmError as exc:
         raise StageError(f"translate: LLM call failed: {exc}") from exc
     return [(segment["id"], refined[segment["id"]]) for segment in segments]
@@ -156,6 +218,14 @@ def run(ctx) -> None:
     cache = None
     if ctx.config.get("translation.cache", True):
         cache = ResponseCache(ctx.workdir / ".llm-cache")
+    term_map = ctx.config.get("translation.term_map", {})
+    if term_map is None:
+        term_map = {}
+    if not isinstance(term_map, dict) or not all(
+        isinstance(key, str) and isinstance(value, str)
+        for key, value in term_map.items()
+    ):
+        raise ConfigError("translation.term_map must be a string-to-string mapping")
 
     batches = list(_batches(segments, batch_size))
 
@@ -166,6 +236,7 @@ def run(ctx) -> None:
             batch,
             source_language,
             target_language.strip(),
+            term_map,
         )
 
     if len(batches) == 1:
