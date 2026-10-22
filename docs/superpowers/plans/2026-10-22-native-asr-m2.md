@@ -10,17 +10,26 @@ encoder 42685.3 / prefill 2793.4 / decode 2271.4 = **49551.9 ms**（预算
 
 ## Task 1: 注意力分数行主序化（softmax 重构）
 
-- [ ] scores GEMM 对调 q/k 操作数（计算 Sᵀ；col-major 落盘即行主序 S），softmax
-      kernel 改连续行访存，PV GEMM opB 改 N；encoder（单块+批处理）与 decoder
-      prefill（单块+组批）四处同步；causal mask kernel 索引随行主序更新。
-- [ ] 门：transcribe（单块、4 块）token-identical；pytest 全绿。
-- [ ] bench 复测并记录收益（预期 encoder 42.7 s → 个位数 s）。
+- [x] scores GEMM 对调 q/k（行主序 S）、连续 softmax、PV opB=N，四处同步；
+      causal mask 随行主序更新。附加：阶段 dump 改可选（此前每层同步 dump 主导
+      计时并被误归因给 GEMM）、Q/K/V head-major scatter 使 scores/PV 每层各一次
+      uniform-batch 调用、conv 前端 im2col+GEMM（朴素 conv2 仅 ~7 GFLOPS）、mel
+      归一化搬 GPU（宿主端 4600 万次单线程 log10 是真凶）、编码器工作区持久化、
+      权重 arena 256B 对齐。
+- [x] 门：批处理 transcribe token-identical 全程保持；encoder 级余弦
+      ≥0.99998；mel 输出 vs 宿主版差 ≤1.5e-07；pytest 9 passed（对齐填充断言
+      已按新语义更新）。
+- [x] bench：**49551.9 → 13666.1 ms**（mel 414 / encoder 8696 / prefill 2344 /
+      decode 2213，中位），距 6666.7 ms 预算差 **2.05×**。瓶颈现状：encoder
+      attention ~4.2 s（物化 scores 的带宽地板，flash 融合是唯一解）、prefill
+      2.34（逐块注意力循环待统一批）、decode 2.21（launch 密集，CUDA graphs）、
+      mel 0.41。
 
 ## Task 2: mel kernel 效率
 
-- [ ] 当前 400-tap 朴素 DFT + 逐 tap reflect 映射（1.8 s）。优化：寄存器化 tap
-      循环 + 预计算边界外的反射索引区间，或分块共享内存。目标 ≤ 0.5 s。
-- [ ] 门：mel 单块/批处理输出与现实现逐字节一致（确定性不变）。
+- [x] 真凶是宿主端归一化而非 DFT kernel：搬 GPU（三段 kernel，per-chunk max），
+      1798 → 414 ms；输出与宿主版差 ≤1.5e-07。
+- [ ] 进一步（STFT kernel 仍高于理论地板，非当前瓶颈）。
 
 ## Task 3: decode/prefill launch 开销
 
