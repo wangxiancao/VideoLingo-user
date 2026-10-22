@@ -32,6 +32,9 @@ whisper:
 
 # New pipeline ASR settings (GLM-ASR + Qwen3-ForcedAligner)
 asr:
+  # glm_asr (transformers/BF16, default) or glm_asr_native (self-developed CUDA engine)
+  backend: glm_asr
+  # native_binary: native/asr/build/glm_asr_m0   # engine binary for glm_asr_native
   # Only 'glm_asr' is implemented; unknown values fail explicitly
   backend: 'glm_asr'
   # 'auto' detects zh/en/ja/ko/ru from the transcript; set an ISO code to override

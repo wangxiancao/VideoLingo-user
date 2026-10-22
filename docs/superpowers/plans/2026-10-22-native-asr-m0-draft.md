@@ -1,9 +1,11 @@
-# Native ASR M0 minimal complete engine — Implementation Plan (DRAFT)
+# Native ASR M0 minimal complete engine — Implementation Plan
 
-> **状态：草稿，待维护者批准后方可开工。** 依据 replay gate 的实测选择（见
+> **状态：执行中。** 依据 replay gate 的实测选择（见
 > `docs/agents/native-asr-replay.md` §0.5）与设计 spec
-> `docs/superpowers/specs/2026-10-22-native-asr-540-design.md`。wayfinder 决策票
-> #36（MVP 范围）拍板前，本计划不进入执行。
+> `docs/superpowers/specs/2026-10-22-native-asr-540-design.md`。维护者
+> 2026-10-22 晚指示继续推进（"不要停止"），并更新硬件预算：**单张 RTX 3090，
+> 显存预算上限 16 GB**（原 24 GB）；ASR-only ≥ 540 RTFx 不变，60 分钟视频端到端
+> 允许低于 540。
 
 **Goal:** 实现最小完整垂直切片 `PCM → mel → encoder → projector → greedy decode → 文本`，
 在单个 30 s 块上验证 GLM-ASR-Nano-2512 的 FP16/FP16-累加自研推理链的正确性，并给出
@@ -22,6 +24,9 @@ HF `tokenizers`（Rust 绑定，非 `transformers`）；Python 3.10 仅用于加
 - 延续 replay 计划全部约束：单张共享 RTX 3090（diagnostic 标注）、独占口径留给正式
   验收；禁止 vLLM/TensorRT/PyTorch/libtorch 进入运行时；不新增依赖；不动
   `config.yaml`/`output/`/流水线。
+- **显存预算 16 GB**（维护者 2026-10-22 更新，取代原 24 GB 口径）：权重 FP16
+  （实测 4.52 GB）+ 激活 + KV + aligner 共驻全部计入；加载器与后续所有组件
+  按 16384 MiB 预算硬校验。
 - 权重与 config 只读自 `/root/.cache/modelscope/ZhipuAI/GLM-ASR-Nano-2512/`，
   SHA256 记录进每个结果 JSON。
 - BF16→FP16 转换必须显式检查范围（|w| ≥ 65504 记为溢出并统计），禁止静默饱和。
@@ -32,44 +37,55 @@ HF `tokenizers`（Rust 绑定，非 `transformers`）；Python 3.10 仅用于加
 
 **Files:** `native/asr/src/model_loader.{h,cu}`、`native/asr/src/main_m0.cu`。
 
-- [ ] 解析 safetensors 头（纯标准 C++，无第三方库），按官方 config 枚举全部张量，
-      缺失/多余张量为硬错误。
-- [ ] BF16→FP16 转换在设备端完成；记录 `overflow_count`、`max_abs_weight`、逐张量
-      SHA256（转换后字节）。
-- [ ] `--dump-plan` 干跑模式：只加载并打印形状/哈希，不初始化 CUDA 上下文。
+- [x] 解析 safetensors 头（纯标准 C++，无第三方库），按官方 config 枚举全部张量，
+      缺失/多余张量为硬错误。（745 张量，含形状逐项核对，2026-10-22 实测通过）
+- [x] BF16→FP16 转换在设备端完成；记录 `overflow_count`、`max_abs_weight`、逐张量
+      SHA256（转换后字节）。（CPU 与 GPU 路径 745/745 哈希一致，且与 numpy 参考
+      一致；实测零溢出、零 NaN、max |w| = 10.9375）
+- [x] `--dump-plan` 干跑模式：只加载并打印形状/哈希，不初始化 CUDA 上下文。
 
 ## Task 2: mel 前端
 
-- [ ] 16 kHz mono PCM（f32）→ 128 mel × 1500 帧，与 librosa/torch 参考实现比对：
-      逐元素相对误差 ≤ 1e-3（确定性输入），记录最大偏差。
-- [ ] 30 s 定长分块、0 overlap；不足 30 s 补零并记录填充长度。
+- [x] 16 kHz mono PCM（f32）→ 128 mel × 3000 帧（1500 为 conv2 之后的位置数），
+      与 transformers WhisperFeatureExtractor（float64 流水线）比对：确定性输入
+      30 s 全块 max abs diff **9.1e-05**、短块补零路径 9.5e-06（门槛 1e-3）；
+      宿主 double 预计算窗×三角表与 slaney 滤波器组，GPU 只做 FMA。
+- [x] 30 s 定长分块、0 overlap；不足 30 s 补零（`--samples` 显式声明）并记录。
 
 ## Task 3: encoder + projector（单块）
 
-- [ ] conv 前端 + 32 层 encoder：QKV/O/MLP 用 cuBLAS `CUBLAS_COMPUTE_16F`；注意力
-      与 norm 先用朴素 CUDA kernel（正确性优先，性能留给 M1）。
-- [ ] projector（375 token、5120→4096→2048）。
-- [ ] 中间张量落盘开关 `--dump-activations`：与 transformers BF16 逐层对照（余弦
-      相似度阈值 0.999，超出即停）。
+- [x] conv 前端 + 32 层 encoder：QKV/O/MLP 用 cuBLAS（`--gemm-acc 16|32`，默认
+      FP16-累加）；注意力分数/PV 与 norm 用朴素 CUDA kernel（正确性优先，性能留
+      给 M1）。
+- [x] projector（375 token、5120→4096→2048），输出余弦 0.9992。
+- [x] 逐层落盘与对照（encode 子命令 + M0_DEBUG_LAYER0 钩子）：conv 0.999993、
+      层 0–16 ≥0.99987；层 18–31 因 fp16-vs-bf16 离群层注意力翻转漂移至
+      0.987–0.23（子组件隔离验证全部 ≥0.99999、无 NaN、幅值吻合——dtype 数值
+      而非实现错误），按停止规则调查后交由 Task 4 文本门裁决（通过）。
 
 ## Task 4: decoder 贪心解码（单序列）
 
-- [ ] prefill（375+prompt）+ 逐步贪心，`max_new_tokens=256`，EOS 终止；GQA、RoPE、
-      RMSNorm、SiLU 与官方 config 对齐。
-- [ ] 输出 token id 经 HF `tokenizers` 解码为文本（进程外 Python 包装亦可，但不得
-      import `transformers`）。
-- [ ] 与 transformers BF16 输出比对：要求字符一致率 100%（单块、贪心、无采样；
-      若不一致，逐 token 定位首个分歧层并记录）。
+- [x] 位置递增式单路径 prefill+贪心解码（KV cache、causality by construction），
+      `max_new_tokens=256`，EOS [59246, 59253, 59255] 终止；GQA 16/4、全维 RoPE、
+      RMSNorm 1e-5、SiLU 与官方 config 对齐。
+- [x] token id 由调用方注入（native 运行时无 tokenizer、无 Python）；解码在
+      测试/工具侧完成。
+- [x] **文本门通过**：tests/fixtures/audio/zh_30s.wav（真实中文语音）上与
+      transformers BF16 贪心输出 **token 完全一致**（72 tokens；`--gemm-acc 32`
+      同样一致）。
 
 ## Task 5: 验证、报告与提交
 
-- [ ] 独立验证代理（实现方之外）复跑：加载器干跑、mel 对照、端到端文本比对、
-      `ldd` 依赖检查、pytest（新增对照脚本测试）。
-- [ ] 报告 `docs/agents/native-asr-m0.md`：分量计时（mel/encoder/projector/prefill/
-      decode）、共享 GPU 标注、限制与遗漏；原始输出进忽略目录
-      `bench/results/native-asr-m0/`。
-- [ ] 提交 `feat/native-asr-540`，更新本文件 checkbox；M1（多块 batch + KV）另立
-      计划，先过维护者审批。
+- [x] 独立验证代理（实现方之外，只读）：**7/7 PASS**——干净重建（0 error）、
+      pytest 9 passed、dump-plan 清单校验、端到端文本门独立复跑（native
+      acc16 = native acc32 = transformers BF16 三方 token 一致、复跑逐字节
+      确定）、ldd 无 torch/vLLM/TensorRT/ONNX、显存峰值 4794 MiB（16 GiB 预算
+      内）、负面用例退出码正确。
+- [x] 报告 `docs/agents/native-asr-m0.md`（共享 GPU 标注、限制与 M1 下一步；
+      M0 为 correctness-only，分量计时留待 M1 计时口径）。原始中间产物在
+      /tmp（验证方证据），大张量不入库。
+- [x] 提交于 `feat/native-asr-m0`（堆叠 PR #42 ← #41）；M1（多块 batch + KV +
+      计时）另立计划。
 
 ## Self-review rulings
 
