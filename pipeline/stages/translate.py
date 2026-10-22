@@ -152,7 +152,7 @@ def run(ctx) -> None:
     max_workers = _positive_int(ctx.config.get("max_workers", 4), "max_workers")
     source_language = _source_language(segments, ctx.config)
 
-    client = create_llm_client(ctx.config, ctx.llm_fixture)
+    client = create_llm_client(ctx.config, ctx.llm_fixture, ctx.llm_service)
     cache = None
     if ctx.config.get("translation.cache", True):
         cache = ResponseCache(ctx.workdir / ".llm-cache")

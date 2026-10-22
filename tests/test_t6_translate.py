@@ -91,7 +91,7 @@ def test_translate_cache_avoids_second_llm_call(tmp_path, monkeypatch):
 
     client = CountingClient()
     monkeypatch.setattr(
-        translate_stage, "create_llm_client", lambda _config, _fixture: client
+        translate_stage, "create_llm_client", lambda _config, _fixture, _service=None: client
     )
     workdir = _workdir(tmp_path)
     config = _config(tmp_path)
@@ -110,7 +110,7 @@ def test_translate_batches_segments(tmp_path, monkeypatch):
 
     client = CountingClient()
     monkeypatch.setattr(
-        translate_stage, "create_llm_client", lambda _config, _fixture: client
+        translate_stage, "create_llm_client", lambda _config, _fixture, _service=None: client
     )
     workdir = tmp_path / "work"
     workdir.mkdir()

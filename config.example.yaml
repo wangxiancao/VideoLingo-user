@@ -19,6 +19,21 @@ api:
 # *Number of LLM multi-threaded accesses, set to 1 if using local LLM
 max_workers: 4
 
+# *Managed local translation LLM (new pipeline only; spec V4).
+# *When enabled, segment/translate stages call a project-spawned OpenAI-compatible
+# *server instead of api.* above; api.key is not read. The service starts before
+# *segment and stops after translate in every run; there is no cloud fallback.
+llm:
+  local:
+    enabled: false
+    # *HY-MT2-1.8B weights (BF16 safetensors). Downloaded once; never at runtime.
+    model_dir: '_model_cache/HY-MT2-1.8B'
+    host: '127.0.0.1'
+    # *0 = pick a free port automatically
+    port: 0
+    # *Seconds to wait for model load + health before failing explicitly
+    startup_timeout_s: 180
+
 # Language settings, written into the prompt, can be described in natural language
 target_language: '简体中文'
 
