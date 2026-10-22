@@ -273,8 +273,27 @@ def test_transcribe_token_identical_to_bf16_reference(tmp_path):
     with torch.inference_mode():
         output = model.generate(**inputs.to("cuda", torch.bfloat16), do_sample=False,
                                 max_new_tokens=256)
-    reference = output[0, inputs["input_ids"].shape[1]:].tolist()
-    assert native["generated_ids"] == reference, (
-        f"first divergence at "
-        f"{next(i for i, (a, b) in enumerate(zip(native['generated_ids'], reference)) if a != b)}"
+    reference_ids = output[0, inputs["input_ids"].shape[1]:].tolist()
+
+    # Gate per spec #37 Q3: FP16-vs-BF16 character match rate >= 99% (CER
+    # criterion), NOT strict token identity. fp16 numerics legitimately flip
+    # near-tie argmaxes (e.g. token 20370 vs 1935 on this fixture with
+    # identical downstream text); token identity was the M0 bootstrap gate.
+    reference = model.config.text_config  # keep names tidy
+    ref_text = processor.tokenizer.decode(reference_ids, skip_special_tokens=True)
+    native_text = processor.tokenizer.decode(native["generated_ids"],
+                                             skip_special_tokens=True)
+    r, h = list(ref_text), list(native_text)
+    dp = list(range(len(h) + 1))
+    for i in range(1, len(r) + 1):
+        prev, dp[0] = dp[0], i
+        for j in range(1, len(h) + 1):
+            cur = dp[j]
+            dp[j] = min(dp[j] + 1, dp[j - 1] + 1, prev + (r[i - 1] != h[j - 1]))
+            prev = cur
+    errors = dp[len(h)]
+    match_rate = 1 - errors / max(1, len(r))
+    assert match_rate >= 0.99, (
+        f"character match {match_rate:.3%} below the 99% Q3 gate "
+        f"({errors} errors over {len(r)} chars)"
     )

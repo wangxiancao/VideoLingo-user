@@ -1387,9 +1387,19 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
     ~HandleGuard() { if (handle) cublasDestroy(handle); }
   } guard{cublas};
 
-  LtGemmCache lt_gemm;
   const auto gemm = [&](const half* w, const half* x, half* y, int m, int n, int k) {
-    lt_gemm.run(w, x, y, m, n, k, options.fp16_accumulate, lt_stream_for(cublas));
+    const half alpha16 = __float2half(1.0f), beta16 = __float2half(0.0f);
+    const float alpha32 = 1.0f, beta32 = 0.0f;
+    CUBLAS_THROW(cublasGemmEx(
+        cublas, CUBLAS_OP_T, CUBLAS_OP_N, n, m, k,
+        options.fp16_accumulate ? static_cast<const void*>(&alpha16)
+                                : static_cast<const void*>(&alpha32),
+        w, CUDA_R_16F, k, x, CUDA_R_16F, k,
+        options.fp16_accumulate ? static_cast<const void*>(&beta16)
+                                : static_cast<const void*>(&beta32),
+        y, CUDA_R_16F, n,
+        options.fp16_accumulate ? CUBLAS_COMPUTE_16F : CUBLAS_COMPUTE_32F,
+        CUBLAS_GEMM_DEFAULT));
   };
   const auto weight = [&](const std::string& name) -> const half* {
     const DeviceWeights::Entry* entry = weights->find(name);
