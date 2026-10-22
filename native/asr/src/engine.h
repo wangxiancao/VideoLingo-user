@@ -69,6 +69,7 @@ EncodeOutput run_encode(const std::vector<float>& mel_features,
 struct DecodeOptions {
   bool fp16_accumulate = true;
   int max_new_tokens = 256;
+  bool prefill_batched = true;  // sequence-level prefill vs per-token (M0 path)
 };
 
 struct DecodeResult {

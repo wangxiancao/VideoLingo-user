@@ -285,6 +285,7 @@ int run_encode(int argc, char** argv) {
 int run_transcribe(int argc, char** argv) {
   std::string model_dir, pcm_path, prompt_path;
   bool fp16_accumulate = true;
+  bool prefill_batched = true;
   int max_new_tokens = 256;
   for (int i = 2; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -341,6 +342,7 @@ int run_transcribe(int argc, char** argv) {
   DecodeOptions decode_options;
   decode_options.fp16_accumulate = fp16_accumulate;
   decode_options.max_new_tokens = max_new_tokens;
+  decode_options.prefill_batched = prefill_batched;
   const DecodeResult decoded =
       run_decode(&weights, static_cast<const uint16_t*>(device_audio), prompt_ids,
                  decode_options);

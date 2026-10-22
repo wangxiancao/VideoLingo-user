@@ -129,6 +129,87 @@ __global__ void rope_full_kernel(half* __restrict__ q, half* __restrict__ k,
   }
 }
 
+
+// ---- Batched prefill kernels (sequence-level, causal) ----
+
+// RoPE for every row of q [rows, 16*128] and k [rows, 4*128]; position = row.
+__global__ void rope_rows_kernel(half* __restrict__ q, half* __restrict__ k,
+                                 const float* __restrict__ cos_t,
+                                 const float* __restrict__ sin_t, int rows) {
+  const int d = threadIdx.x;              // 0..63 frequency pair
+  const int row = blockIdx.x;
+  if (d >= kTextRotaryDim / 2 || row >= rows) return;
+  const float c = cos_t[static_cast<size_t>(row) * (kTextRotaryDim / 2) + d];
+  const float s = sin_t[static_cast<size_t>(row) * (kTextRotaryDim / 2) + d];
+  half* q_row = q + static_cast<size_t>(row) * kTextHidden;
+  for (int h = 0; h < kTextHeads; ++h) {
+    half* ptr = q_row + static_cast<size_t>(h) * kTextHeadDim;
+    const float x1 = __half2float(ptr[d]);
+    const float x2 = __half2float(ptr[d + kTextRotaryDim / 2]);
+    ptr[d] = __float2half(x1 * c - x2 * s);
+    ptr[d + kTextRotaryDim / 2] = __float2half(x2 * c + x1 * s);
+  }
+  half* k_row = k + static_cast<size_t>(row) * (kTextKvHeads * kTextHeadDim);
+  for (int h = 0; h < kTextKvHeads; ++h) {
+    half* ptr = k_row + static_cast<size_t>(h) * kTextHeadDim;
+    const float x1 = __half2float(ptr[d]);
+    const float x2 = __half2float(ptr[d + kTextRotaryDim / 2]);
+    ptr[d] = __float2half(x1 * c - x2 * s);
+    ptr[d + kTextRotaryDim / 2] = __float2half(x2 * c + x1 * s);
+  }
+}
+
+// Causal mask on the col-major score buffer S(i, j) at [i + j*L]: j > i -> -inf.
+__global__ void causal_mask_kernel(half* __restrict__ scores, int heads, int length) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= length || j >= length) return;
+  if (j > i) {
+    for (int h = 0; h < heads; ++h)
+      scores[static_cast<size_t>(h) * length * length + i +
+             static_cast<size_t>(j) * length] = __float2half(-65504.0f);
+  }
+}
+
+// Row softmax over the col-major score buffer (one query row per block).
+__global__ void softmax_rows_kernel(half* __restrict__ scores, int heads, int length) {
+  const int query = blockIdx.x;
+  const int head = blockIdx.y;
+  if (query >= length || head >= heads) return;
+  half* base = scores + static_cast<size_t>(head) * length * length;
+  __shared__ float shared[256];
+  float local_max = -1e30f;
+  for (int j = threadIdx.x; j < length; j += blockDim.x)
+    local_max = fmaxf(local_max, __half2float(base[query + static_cast<size_t>(j) * length]));
+  shared[threadIdx.x] = local_max;
+  __syncthreads();
+  float maximum = -1e30f;
+  for (int i = 0; i < blockDim.x; ++i) maximum = fmaxf(maximum, shared[i]);
+  float local_sum = 0.0f;
+  for (int j = threadIdx.x; j < length; j += blockDim.x)
+    local_sum += __expf(__half2float(base[query + static_cast<size_t>(j) * length]) - maximum);
+  shared[threadIdx.x] = local_sum;
+  __syncthreads();
+  float total = 0.0f;
+  for (int i = 0; i < blockDim.x; ++i) total += shared[i];
+  const float inv = 1.0f / total;
+  for (int j = threadIdx.x; j < length; j += blockDim.x)
+    base[query + static_cast<size_t>(j) * length] =
+        __float2half(__expf(__half2float(base[query + static_cast<size_t>(j) * length]) - maximum) * inv);
+}
+
+// Writes the prefilled k/v rows [rows, 512] into a chunk's KV cache slots.
+__global__ void append_kv_rows_kernel(const half* __restrict__ k, const half* __restrict__ v,
+                                      half* __restrict__ k_cache, half* __restrict__ v_cache,
+                                      int start, int rows) {
+  const size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const int width = kTextKvHeads * kTextHeadDim;
+  if (i >= static_cast<size_t>(rows) * width) return;
+  const int row = static_cast<int>(i / width);
+  k_cache[static_cast<size_t>(start + row) * width + i % width] = k[i];
+  v_cache[static_cast<size_t>(start + row) * width + i % width] = v[i];
+}
+
 // Single-position attention over the cache for one query head: scores against
 // all cached keys of the matching KV head (GQA group), softmax, weighted sum.
 __global__ void attention_step_kernel(const half* __restrict__ q,      // [2048]
@@ -208,6 +289,24 @@ std::vector<float> build_full_rope_table(bool cosine) {
   return table;
 }
 
+// Frees every device pointer it owns, on every exit path.
+class BufferGuard {
+ public:
+  ~BufferGuard() {
+    for (void* p : owned_) cudaFree(p);
+  }
+  void* alloc(size_t bytes) {
+    void* p = nullptr;
+    const cudaError_t status = cudaMalloc(&p, bytes);
+    if (status != cudaSuccess) throw ExecutionError(cuda_error(status, "cudaMalloc"));
+    owned_.push_back(p);
+    return p;
+  }
+
+ private:
+  std::vector<void*> owned_;
+};
+
 #define CUBLAS_THROW(expr)                                                      \
   do {                                                                          \
     const cublasStatus_t status_ = (expr);                                      \
@@ -238,6 +337,20 @@ DecodeResult run_decode(DeviceWeights* weights, const uint16_t* audio_embeds_raw
     const float alpha32 = 1.0f, beta32 = 0.0f;
     CUBLAS_THROW(cublasGemmEx(
         cublas, CUBLAS_OP_T, CUBLAS_OP_N, n, 1, k,
+        options.fp16_accumulate ? static_cast<const void*>(&alpha16)
+                                : static_cast<const void*>(&alpha32),
+        w, CUDA_R_16F, k, x, CUDA_R_16F, k,
+        options.fp16_accumulate ? static_cast<const void*>(&beta16)
+                                : static_cast<const void*>(&beta32),
+        y, CUDA_R_16F, n,
+        options.fp16_accumulate ? CUBLAS_COMPUTE_16F : CUBLAS_COMPUTE_32F,
+        CUBLAS_GEMM_DEFAULT));
+  };
+  const auto gemm_rows = [&](const half* w, const half* x, half* y, int m, int n, int k) {
+    const half alpha16 = __float2half(1.0f), beta16 = __float2half(0.0f);
+    const float alpha32 = 1.0f, beta32 = 0.0f;
+    CUBLAS_THROW(cublasGemmEx(
+        cublas, CUBLAS_OP_T, CUBLAS_OP_N, n, m, k,
         options.fp16_accumulate ? static_cast<const void*>(&alpha16)
                                 : static_cast<const void*>(&alpha32),
         w, CUDA_R_16F, k, x, CUDA_R_16F, k,
@@ -369,24 +482,157 @@ DecodeResult run_decode(DeviceWeights* weights, const uint16_t* audio_embeds_raw
 
     DecodeResult result;
     const std::vector<int64_t> eos_ids = {59246, 59253, 59255};
-    // Prefill: run every prompt row through the cache; the last row yields
-    // the first generated token.
-    for (size_t pos = 0; pos < prompt_length; ++pos) {
-      CUDA_CHECK(cudaMemcpy(d_h, d_x + pos * hidden_count, hidden_count * sizeof(half),
-                            cudaMemcpyDeviceToDevice));
-      const bool last = pos + 1 == prompt_length;
-      const int64_t next = forward_position(static_cast<int>(pos), last);
-      if (last) {
-        result.generated_ids.push_back(next);
-        if (std::find(eos_ids.begin(), eos_ids.end(), next) != eos_ids.end()) {
-          result.stop_reason = 0;
-          cudaFree(d_prompt_ids); cudaFree(d_x); cudaFree(d_row); cudaFree(d_h);
-          cudaFree(d_ln); cudaFree(d_q); cudaFree(d_k); cudaFree(d_v); cudaFree(d_attn);
-          cudaFree(d_mlp_g); cudaFree(d_mlp_u); cudaFree(d_logits); cudaFree(d_kv_cache);
-          cudaFree(d_cos); cudaFree(d_sin);
-          return result;
+
+    // Batched prefill: the whole prompt through every layer as sequence-level
+    // GEMMs with causal masked attention, writing the KV cache in one pass.
+    // GQA (16 query heads on 4 KV heads) runs as 4 uniform-stride batched GEMMs.
+    const auto prefill_batched = [&]() -> int64_t {
+      const int length = static_cast<int>(prompt_length);
+      const size_t seq_hidden = prompt_length * hidden_count;
+      const size_t seq_kv = prompt_length * kv_width;
+      const size_t seq_mlp = prompt_length * mlp_width;
+      BufferGuard seq;
+      half* h_seq = static_cast<half*>(seq.alloc(seq_hidden * sizeof(half)));
+      half* ln_seq = static_cast<half*>(seq.alloc(seq_hidden * sizeof(half)));
+      half* q_seq = static_cast<half*>(seq.alloc(seq_hidden * sizeof(half)));
+      half* k_seq = static_cast<half*>(seq.alloc(seq_kv * sizeof(half)));
+      half* v_seq = static_cast<half*>(seq.alloc(seq_kv * sizeof(half)));
+      half* attn_seq = static_cast<half*>(seq.alloc(seq_hidden * sizeof(half)));
+      half* scratch_seq = static_cast<half*>(seq.alloc(seq_hidden * sizeof(half)));
+      half* mlp_g_seq = static_cast<half*>(seq.alloc(seq_mlp * sizeof(half)));
+      half* mlp_u_seq = static_cast<half*>(seq.alloc(seq_mlp * sizeof(half)));
+      half* scores = static_cast<half*>(seq.alloc(
+          static_cast<size_t>(kTextHeads) * prompt_length * prompt_length * sizeof(half)));
+      CUDA_CHECK(cudaMemcpy(h_seq, d_x, seq_hidden * sizeof(half), cudaMemcpyDeviceToDevice));
+
+      const float attn_scale = 1.0f / 11.3137085f;
+      const float one32 = 1.0f, zero32 = 0.0f;
+      const half zero32_h = __float2half(0.0f);
+      for (int layer = 0; layer < kTextLayers; ++layer) {
+        const std::string p = "language_model.model.layers." + std::to_string(layer) + ".";
+        half* k_cache =
+            d_kv_cache + static_cast<size_t>(layer) * 2 * kMaxSequence * kv_width;
+        half* v_cache = k_cache + static_cast<size_t>(kMaxSequence) * kv_width;
+        CUDA_CHECK(cudaMemcpy(ln_seq, h_seq, seq_hidden * sizeof(half),
+                              cudaMemcpyDeviceToDevice));
+        rmsnorm_kernel<<<static_cast<unsigned>(prompt_length), 256, 257 * sizeof(float)>>>(
+            ln_seq, weight(p + "input_layernorm.weight"), kTextHidden);
+        CUDA_CHECK(cudaGetLastError());
+        gemm_rows(weight(p + "self_attn.q_proj.weight"), ln_seq, q_seq, length, kTextHidden,
+                  kTextHidden);
+        gemm_rows(weight(p + "self_attn.k_proj.weight"), ln_seq, k_seq, length,
+                  static_cast<int>(kv_width), kTextHidden);
+        gemm_rows(weight(p + "self_attn.v_proj.weight"), ln_seq, v_seq, length,
+                  static_cast<int>(kv_width), kTextHidden);
+        rope_rows_kernel<<<static_cast<unsigned>(prompt_length), 64>>>(
+            q_seq, k_seq, d_cos, d_sin, length);
+        CUDA_CHECK(cudaGetLastError());
+        append_kv_rows_kernel<<<static_cast<unsigned>((seq_kv + 127) / 128), 128>>>(
+            k_seq, v_seq, k_cache, v_cache, 0, length);
+        CUDA_CHECK(cudaGetLastError());
+        for (int group = 0; group < kTextHeads / kTextKvHeads; ++group) {
+          const int heads_per_group = kTextHeads / kTextKvHeads;  // 4
+          const half* q_group = q_seq + static_cast<size_t>(group) * heads_per_group * kTextHeadDim;
+          const half* k_group = k_seq + static_cast<size_t>(group) * kTextHeadDim;
+          CUBLAS_THROW(cublasGemmStridedBatchedEx(
+              cublas, CUBLAS_OP_T, CUBLAS_OP_N, length, length, kTextHeadDim,
+              static_cast<const void*>(&attn_scale), q_group, CUDA_R_16F, kTextHidden,
+              kTextHeadDim, k_group, CUDA_R_16F, static_cast<int>(kv_width), 0,
+              static_cast<const void*>(&zero32),
+              scores + static_cast<size_t>(group) * heads_per_group * prompt_length * prompt_length,
+              CUDA_R_16F, length, static_cast<long long>(prompt_length) * prompt_length,
+              heads_per_group, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
+        }
+        {
+          const dim3 blocks((static_cast<unsigned>(prompt_length) + 15) / 16,
+                            (static_cast<unsigned>(prompt_length) + 15) / 16);
+          causal_mask_kernel<<<blocks, dim3(16, 16)>>>(scores, kTextHeads, length);
+          CUDA_CHECK(cudaGetLastError());
+          softmax_rows_kernel<<<dim3(static_cast<unsigned>(prompt_length), kTextHeads), 256>>>(
+              scores, kTextHeads, length);
+          CUDA_CHECK(cudaGetLastError());
+        }
+        for (int group = 0; group < kTextHeads / kTextKvHeads; ++group) {
+          const int heads_per_group = kTextHeads / kTextKvHeads;
+          const half* v_group = v_seq + static_cast<size_t>(group) * kTextHeadDim;
+          CUBLAS_THROW(cublasGemmStridedBatchedEx(
+              cublas, CUBLAS_OP_N, CUBLAS_OP_T, kTextHeadDim, length, length,
+              static_cast<const void*>(&one32), v_group, CUDA_R_16F,
+              static_cast<int>(kv_width), 0,
+              scores + static_cast<size_t>(group) * heads_per_group * prompt_length * prompt_length,
+              CUDA_R_16F, length, static_cast<long long>(prompt_length) * prompt_length,
+              static_cast<const void*>(&zero32_h),
+              attn_seq + static_cast<size_t>(group) * heads_per_group * kTextHeadDim,
+              CUDA_R_16F, kTextHidden, kTextHeadDim, heads_per_group, CUBLAS_COMPUTE_32F,
+              CUBLAS_GEMM_DEFAULT));
+        }
+        gemm_rows(weight(p + "self_attn.o_proj.weight"), attn_seq, scratch_seq, length,
+                  kTextHidden, kTextHidden);
+        residual_add_kernel<<<static_cast<unsigned>((seq_hidden + 255) / 256), 256>>>(
+            h_seq, scratch_seq, seq_hidden);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaMemcpy(ln_seq, h_seq, seq_hidden * sizeof(half),
+                              cudaMemcpyDeviceToDevice));
+        rmsnorm_kernel<<<static_cast<unsigned>(prompt_length), 256, 257 * sizeof(float)>>>(
+            ln_seq, weight(p + "post_attention_layernorm.weight"), kTextHidden);
+        CUDA_CHECK(cudaGetLastError());
+        gemm_rows(weight(p + "mlp.gate_proj.weight"), ln_seq, mlp_g_seq, length,
+                  static_cast<int>(mlp_width), kTextHidden);
+        gemm_rows(weight(p + "mlp.up_proj.weight"), ln_seq, mlp_u_seq, length,
+                  static_cast<int>(mlp_width), kTextHidden);
+        silu_mul_kernel<<<static_cast<unsigned>((seq_mlp + 255) / 256), 256>>>(
+            mlp_g_seq, mlp_u_seq, seq_mlp);
+        CUDA_CHECK(cudaGetLastError());
+        gemm_rows(weight(p + "mlp.down_proj.weight"), mlp_g_seq, scratch_seq, length,
+                  kTextHidden, static_cast<int>(mlp_width));
+        residual_add_kernel<<<static_cast<unsigned>((seq_hidden + 255) / 256), 256>>>(
+            h_seq, scratch_seq, seq_hidden);
+        CUDA_CHECK(cudaGetLastError());
+      }
+      rmsnorm_kernel<<<static_cast<unsigned>(prompt_length), 256, 257 * sizeof(float)>>>(
+          h_seq, weight("language_model.model.norm.weight"), kTextHidden);
+      CUDA_CHECK(cudaGetLastError());
+      // The first generated token comes from the last prompt row only.
+      CUDA_CHECK(cudaMemcpy(d_h, h_seq + (prompt_length - 1) * hidden_count,
+                            hidden_count * sizeof(half), cudaMemcpyDeviceToDevice));
+      gemv(weight("language_model.lm_head.weight"), d_h, d_logits, kVocab, kTextHidden);
+      CUDA_CHECK(cudaMemcpy(logits_host.data(), d_logits, kVocab * sizeof(half),
+                            cudaMemcpyDeviceToHost));
+      int best = 0;
+      float best_value = -1e30f;
+      for (int i = 0; i < kVocab; ++i) {
+        const float value = __half2float(logits_host[i]);
+        if (value > best_value) {
+          best_value = value;
+          best = i;
         }
       }
+      return static_cast<int64_t>(best);
+    };
+
+    int64_t first_token;
+    if (options.prefill_batched) {
+      first_token = prefill_batched();
+    } else {
+      // M0 sequential path: run every prompt row through the cache; the last
+      // row yields the first generated token.
+      first_token = -1;
+      for (size_t pos = 0; pos < prompt_length; ++pos) {
+        CUDA_CHECK(cudaMemcpy(d_h, d_x + pos * hidden_count, hidden_count * sizeof(half),
+                              cudaMemcpyDeviceToDevice));
+        const bool last = pos + 1 == prompt_length;
+        const int64_t next = forward_position(static_cast<int>(pos), last);
+        if (last) first_token = next;
+      }
+    }
+    result.generated_ids.push_back(first_token);
+    if (std::find(eos_ids.begin(), eos_ids.end(), first_token) != eos_ids.end()) {
+      result.stop_reason = 0;
+      cudaFree(d_prompt_ids); cudaFree(d_x); cudaFree(d_row); cudaFree(d_h);
+      cudaFree(d_ln); cudaFree(d_q); cudaFree(d_k); cudaFree(d_v); cudaFree(d_attn);
+      cudaFree(d_mlp_g); cudaFree(d_mlp_u); cudaFree(d_logits); cudaFree(d_kv_cache);
+      cudaFree(d_cos); cudaFree(d_sin);
+      return result;
     }
     // Decode loop.
     int64_t current = result.generated_ids.back();
