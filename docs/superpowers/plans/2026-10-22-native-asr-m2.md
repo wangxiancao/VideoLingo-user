@@ -37,14 +37,21 @@ encoder 42685.3 / prefill 2793.4 / decode 2271.4 = **49551.9 ms**（预算
       ~10 kernel），prefill 注意力与 encoder 同源收益自动获得。
 - [ ] 门：token-identical 保持。
 
-## Task 4: 真实 1 h 验收（#35 合同）
+## Task 4: 真实 1 h 验收（#35 合同）——已执行，未达标，升级 #38
 
-- [ ] 寻找/构造真实 1 h 音频（非循环拼接；优先仓库/本机既有长音频），切 120 块。
-- [ ] 独占 GPU：记录 compute PID 快照，外部进程清零后跑 3 次热跑（首次预热
-      排除），中位数 ≤ 6666.7 ms → **540 RTFx 验收**；超标则记录差距并按
-      #38 三岔口升级。
-- [ ] #37 Q3 质量门：FP16 vs BF16 在固定语料上 CER 对照（字符一致率 ≥99%）。
-- [ ] 报告 `docs/agents/native-asr-m2.md` + PR/地图留痕。
+- [x] 真实 1 h：`output/audio/raw.mp3`（80.7 min）取前 60 min 切 120 块
+      （`--pcm-long` 多块输入，无循环拼接）。
+- [x] 独占 GPU（compute 进程为零，快照记录于 PR 评论）3 次热跑中位：
+      mel 413.9 / encoder 8632.0 / prefill 2255.2 / decode 3172.9 =
+      **14474.0 ms = 248.7 RTFx**，超 6666.7 ms 预算 2.17× → 未达 540，
+      按 rulings 升级 #38。
+- [x] #37 Q3 质量门：**通过**——真实 120 块 FP16 vs BF16 字符一致率
+      **99.468%**（门槛 ≥99%），86/120 块逐字一致。
+- [x] 验收前置修复：lockstep decode 的 gather 把每块 token 数组按 prompt
+      索引（ids[pos]）——所有块每步嵌入块 0 的 token。相同块门对此结构性
+      失明；4-不同块判别器 + KV 转储定位（批内块 2 的 step-1 K = 块 0 的，
+      cos 1.0）。修复后 distinct-4 每块 = 单块参考。
+- [x] PR/地图/#38 留痕；证据 `bench/results/native-asr-m1/`（本地）。
 
 ## Rulings
 
