@@ -1,4 +1,5 @@
 #include "model_loader.h"
+#include "engine.h"
 
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
@@ -803,11 +804,44 @@ LoadReport device_load_pass(const std::string& model_dir, uint64_t max_vram_byte
   report.compute_capability = cc.str();
   report.device_total_memory = static_cast<uint64_t>(properties.totalGlobalMem);
 
-  // Budget check before touching the device: resident FP16 weights plus the
-  // largest single BF16 staging buffer must fit the configured VRAM budget.
+  DeviceWeights weights = load_weights_resident(model_dir, max_vram_bytes);
+  MappedCheckpoint checkpoint(model_dir + "/model.safetensors", data_offset);
+  Sha256 hash;
+  for (const TensorSpec& t : tensors) {
+    const DeviceWeights::Entry* entry = weights.find(t.name);
+    if (!entry) throw ExecutionError("resident weights missing tensor: " + t.name);
+    std::vector<uint8_t> fp16_host(t.nbytes());
+    CUDA_CHECK(cudaMemcpy(fp16_host.data(), entry->ptr, t.nbytes(), cudaMemcpyDeviceToHost));
+    hash.reset();
+    hash.update(fp16_host.data(), fp16_host.size());
+
+    const std::vector<uint8_t> bf16 = checkpoint.read(t.begin, t.nbytes());
+    ConvertedTensor converted;
+    converted.name = t.name;
+    converted.shape = t.shape;
+    converted.sha256_fp16 = hash.hexdigest();
+    converted.element_count = t.element_count();
+    accumulate_stats(bf16, fp16_host, &converted);
+    merge_into_report(converted, &report);
+  }
+  report.weights_device_bytes = weights.device_bytes();
   uint64_t largest_bf16 = 0;
   for (const TensorSpec& t : tensors) largest_bf16 = std::max(largest_bf16, t.nbytes());
-  const uint64_t peak_estimate = report.fp16_bytes + largest_bf16;
+  report.peak_device_bytes = report.fp16_bytes + largest_bf16;
+  return report;
+}
+
+DeviceWeights load_weights_resident(const std::string& model_dir, uint64_t max_vram_bytes) {
+  LoadReport inventory;
+  inventory.model_dir = model_dir;
+  inventory.config_sha256 = sha256_file(model_dir + "/config.json");
+  std::vector<TensorSpec> tensors;
+  uint64_t data_offset = 0;
+  collect_inventory(model_dir, &inventory, &tensors, &data_offset);
+
+  uint64_t largest_bf16 = 0;
+  for (const TensorSpec& t : tensors) largest_bf16 = std::max(largest_bf16, t.nbytes());
+  const uint64_t peak_estimate = inventory.fp16_bytes + largest_bf16;
   if (peak_estimate > max_vram_bytes) {
     std::ostringstream detail;
     detail << "estimated device peak " << peak_estimate << " bytes exceeds VRAM budget "
@@ -816,51 +850,38 @@ LoadReport device_load_pass(const std::string& model_dir, uint64_t max_vram_byte
   }
 
   MappedCheckpoint checkpoint(model_dir + "/model.safetensors", data_offset);
-  Sha256 hash;
-
-  // Allocate one contiguous FP16 weight arena; every tensor converts in place
-  // through a staging BF16 buffer sized for the largest tensor.
+  DeviceWeights weights;
   uint16_t* arena = nullptr;
   uint16_t* staging = nullptr;
   try {
-    CUDA_CHECK(cudaMalloc(&arena, report.fp16_bytes));
+    CUDA_CHECK(cudaMalloc(&arena, inventory.fp16_bytes));
     CUDA_CHECK(cudaMalloc(&staging, largest_bf16));
-    uint64_t arena_cursor = 0;
-    std::vector<uint8_t> fp16_host;
+    uint64_t cursor = 0;
     for (const TensorSpec& t : tensors) {
       const std::vector<uint8_t> bf16 = checkpoint.read(t.begin, t.nbytes());
-      const size_t count = bf16.size() / 2;
+      const uint64_t count = t.element_count();
       CUDA_CHECK(cudaMemcpy(staging, bf16.data(), bf16.size(), cudaMemcpyHostToDevice));
       const unsigned threads = 256;
       const uint64_t blocks = (count + threads - 1) / threads;
       convert_bf16_to_fp16_kernel<<<static_cast<unsigned>(blocks), threads>>>(
-          staging, arena + arena_cursor, static_cast<uint64_t>(count));
+          staging, arena + cursor, count);
       CUDA_CHECK(cudaGetLastError());
       CUDA_CHECK(cudaDeviceSynchronize());
 
-      fp16_host.resize(bf16.size());
-      CUDA_CHECK(cudaMemcpy(fp16_host.data(), arena + arena_cursor, bf16.size(),
-                            cudaMemcpyDeviceToHost));
-      hash.reset();
-      hash.update(fp16_host.data(), fp16_host.size());
-
-      ConvertedTensor converted;
-      converted.name = t.name;
-      converted.shape = t.shape;
-      converted.sha256_fp16 = hash.hexdigest();
-      converted.element_count = count;
-      accumulate_stats(bf16, fp16_host, &converted);
-      merge_into_report(converted, &report);
-      arena_cursor += count;
+      DeviceWeights::Entry entry;
+      entry.ptr = arena + cursor;
+      entry.shape = t.shape;
+      entry.elements = count;
+      weights.entries_.emplace_back(t.name, std::move(entry));
+      cursor += count;
     }
-    report.weights_device_bytes = report.fp16_bytes;
-    report.peak_device_bytes = peak_estimate;
+    weights.arena_ = arena;
+    weights.bytes_ = inventory.fp16_bytes;
+    cudaFree(staging);
   } catch (...) {
     if (staging) cudaFree(staging);
     if (arena) cudaFree(arena);
     throw;
   }
-  cudaFree(staging);
-  cudaFree(arena);
-  return report;
+  return weights;
 }

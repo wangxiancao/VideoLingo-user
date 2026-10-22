@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "engine.h"
 #include "mel_frontend.h"
 #include "model_loader.h"
 
@@ -24,6 +25,28 @@ namespace {
 
 using InvalidInput = ModelInputError;
 using ExecutionError = ModelExecutionError;
+
+// Reads raw little-endian f32 mono PCM and zero-pads to the 30 s chunk.
+std::vector<float> read_pcm_padded(const std::string& pcm_path, uint64_t samples_requested,
+                                   bool samples_given) {
+  std::vector<float> pcm(kChunkSamples, 0.0f);
+  std::ifstream in(pcm_path, std::ios::binary);
+  if (!in) throw InvalidInput("cannot open PCM file: " + pcm_path);
+  in.seekg(0, std::ios::end);
+  const uint64_t bytes = static_cast<uint64_t>(in.tellg());
+  if (bytes % sizeof(float) != 0) throw InvalidInput("PCM file size is not a multiple of 4");
+  const uint64_t file_samples = bytes / sizeof(float);
+  if (file_samples > static_cast<uint64_t>(kChunkSamples))
+    throw InvalidInput("PCM file exceeds the 30 s chunk (480000 samples)");
+  if (samples_given && samples_requested > file_samples)
+    throw InvalidInput("--samples exceeds the PCM file contents");
+  const uint64_t used = samples_given ? samples_requested : file_samples;
+  in.seekg(0, std::ios::beg);
+  if (used > 0)
+    in.read(reinterpret_cast<char*>(pcm.data()), static_cast<std::streamsize>(used * sizeof(float)));
+  if (!in) throw ExecutionError("short read from PCM file");
+  return pcm;
+}
 
 std::string json_escape(const std::string& value) {
   std::string out;
@@ -99,6 +122,8 @@ void usage(std::ostream& out) {
   out << "usage: glm_asr_m0 --model-dir DIR [--dump-plan [--hash]] [--load]\n"
       << "                  [--max-vram-mib N]\n"
       << "       glm_asr_m0 mel --pcm FILE [--samples N] --out FILE\n"
+      << "       glm_asr_m0 encode --model-dir DIR --pcm FILE --out-dir DIR\n"
+      << "                        [--samples N] [--gemm-acc 16|32]\n"
       << "  --dump-plan : parse config + header only (no CUDA); --hash converts\n"
       << "                and hashes every tensor on the CPU\n"
       << "  --load      : convert on device, keep FP16 weights resident and hash\n"
@@ -139,25 +164,7 @@ int run_mel(int argc, char** argv) {
   if (pcm_path.empty() || out_path.empty())
     throw InvalidInput("mel mode requires --pcm and --out");
 
-  std::vector<float> pcm(kChunkSamples, 0.0f);
-  {
-    std::ifstream in(pcm_path, std::ios::binary);
-    if (!in) throw InvalidInput("cannot open PCM file: " + pcm_path);
-    in.seekg(0, std::ios::end);
-    const uint64_t bytes = static_cast<uint64_t>(in.tellg());
-    if (bytes % sizeof(float) != 0) throw InvalidInput("PCM file size is not a multiple of 4");
-    const uint64_t file_samples = bytes / sizeof(float);
-    if (file_samples > static_cast<uint64_t>(kChunkSamples))
-      throw InvalidInput("PCM file exceeds the 30 s chunk (480000 samples)");
-    if (samples_given && samples > file_samples)
-      throw InvalidInput("--samples exceeds the PCM file contents");
-    const uint64_t used = samples_given ? samples : file_samples;
-    in.seekg(0, std::ios::beg);
-    if (used > 0)
-      in.read(reinterpret_cast<char*>(pcm.data()), static_cast<std::streamsize>(used * sizeof(float)));
-    if (!in) throw ExecutionError("short read from PCM file");
-  }
-
+  const std::vector<float> pcm = read_pcm_padded(pcm_path, samples, samples_given);
   const MelOutput mel = compute_mel(pcm);
   {
     std::ofstream out(out_path, std::ios::binary);
@@ -191,9 +198,90 @@ int run_mel(int argc, char** argv) {
 
 }  // namespace
 
+int run_encode(int argc, char** argv) {
+  std::string model_dir, pcm_path, out_dir;
+  bool fp16_accumulate = true;
+  uint64_t samples = 0;
+  bool samples_given = false;
+  for (int i = 2; i < argc; ++i) {
+    const std::string arg = argv[i];
+    const auto next_value = [&]() -> std::string {
+      if (i + 1 >= argc) throw InvalidInput("missing value for " + arg);
+      return argv[++i];
+    };
+    if (arg == "--model-dir") {
+      model_dir = next_value();
+    } else if (arg == "--pcm") {
+      pcm_path = next_value();
+    } else if (arg == "--out-dir") {
+      out_dir = next_value();
+    } else if (arg == "--samples") {
+      const std::string value = next_value();
+      char* end = nullptr;
+      const unsigned long long parsed = std::strtoull(value.c_str(), &end, 10);
+      if (value.empty() || !end || *end != '\0' || parsed == 0 || parsed > kChunkSamples)
+        throw InvalidInput("--samples is out of range: " + value);
+      samples = parsed;
+      samples_given = true;
+    } else if (arg == "--gemm-acc") {
+      const std::string value = next_value();
+      if (value == "16") fp16_accumulate = true;
+      else if (value == "32") fp16_accumulate = false;
+      else throw InvalidInput("--gemm-acc must be 16 or 32");
+    } else {
+      throw InvalidInput("unknown encode argument: " + arg);
+    }
+  }
+  if (model_dir.empty() || pcm_path.empty() || out_dir.empty())
+    throw InvalidInput("encode mode requires --model-dir, --pcm and --out-dir");
+
+  const std::vector<float> pcm = read_pcm_padded(pcm_path, samples, samples_given);
+  const MelOutput mel = compute_mel(pcm);
+  DeviceWeights weights = load_weights_resident(model_dir, 16384ull * 1024 * 1024);
+
+  EncodeOptions options;
+  options.fp16_accumulate = fp16_accumulate;
+  const EncodeOutput encoded = run_encode(mel.features, &weights, options);
+
+  const auto write_raw = [&](const std::string& name, const std::vector<float>& data) {
+    const std::string path = out_dir + "/" + name;
+    std::ofstream out(path, std::ios::binary);
+    if (!out) throw InvalidInput("cannot open output file: " + path);
+    out.write(reinterpret_cast<const char*>(data.data()),
+              static_cast<std::streamsize>(data.size() * sizeof(float)));
+    if (!out) throw ExecutionError("short write to output file: " + path);
+  };
+  write_raw("mel.f32", mel.features);
+  write_raw("conv.f32", encoded.conv_hidden);
+  const size_t hidden_count = encoded.conv_hidden.size();
+  for (size_t layer = 0; layer < encoded.layer_hidden.size() / hidden_count; ++layer) {
+    char name[32];
+    std::snprintf(name, sizeof(name), "layer_%02zu.f32", layer);
+    write_raw(name,
+              std::vector<float>(encoded.layer_hidden.begin() + hidden_count * layer,
+                                 encoded.layer_hidden.begin() + hidden_count * (layer + 1)));
+  }
+  write_raw("norm.f32", encoded.final_norm);
+  write_raw("projector.f32", encoded.projector);
+
+  std::cout << "{\n"
+            << "  \"schema_version\": 1,\n"
+            << "  \"tool\": \"native_asr_m0_encode\",\n"
+            << "  \"measurement_kind\": \"correctness_only\",\n"
+            << "  \"gemm_acc\": \"" << (fp16_accumulate ? "fp16" : "fp32") << "\",\n"
+            << "  \"out_dir\": \"" << json_escape(out_dir) << "\",\n"
+            << "  \"files\": [\"mel.f32\", \"conv.f32\", \"layer_00.f32..layer_31.f32\","
+            << " \"norm.f32\", \"projector.f32\"],\n"
+            << "  \"projector_shape\": [375, 2048]\n"
+            << "}\n";
+  return 0;
+}
+
 int main(int argc, char** argv) {
   try {
-    if (argc >= 2 && std::string(argv[1]) == "mel") return run_mel(argc, argv);
+    const std::string first = argc >= 2 ? argv[1] : "";
+    if (first == "mel") return run_mel(argc, argv);
+    if (first == "encode") return run_encode(argc, argv);
 
     std::string model_dir;
     bool dump_plan = false;
