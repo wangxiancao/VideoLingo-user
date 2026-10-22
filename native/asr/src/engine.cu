@@ -234,6 +234,156 @@ __global__ void rope_kernel(half* __restrict__ x, const float* __restrict__ cos_
 
 
 
+
+// ---------------------------------------------------------------------------
+// Flash-style fused attention (wmma tensor cores, online softmax). Reads
+// head-major Q/K/V [batch, seq, dim] (batch = chunks*heads), writes head-major
+// output; never materializes the score matrix in HBM. Optional causal mask
+// for the decoder prefill. Scale = 1/sqrt(dim) applied inside.
+// One block per (query tile of 64, batch); 4 warps, 16 query rows per warp.
+// ---------------------------------------------------------------------------
+#include <mma.h>
+
+constexpr int kFlashTile = 64;
+
+__global__ void flash_attention_kernel(const half* __restrict__ q,  // [b, s, d]
+                                       const half* __restrict__ k,
+                                       const half* __restrict__ v,
+                                       half* __restrict__ out, int seq, int dim,
+                                       int query_tiles, bool causal) {
+  using namespace nvcuda;
+  const int tile = blockIdx.x;        // query tile
+  const int b = blockIdx.y;           // (chunk, head) batch index
+  if (tile >= query_tiles) return;
+  const float scale = 1.0f / sqrtf(static_cast<float>(dim));
+
+  extern __shared__ char smem_raw[];
+  half* sQ = reinterpret_cast<half*>(smem_raw);                  // [64, 64]
+  half* sK = sQ + kFlashTile * kFlashTile;                       // [64, 64]
+  half* sV = sK + kFlashTile * kFlashTile;                       // [64, 64]
+  float* sS = reinterpret_cast<float*>(sV + kFlashTile * kFlashTile);  // [64, 64]
+  float* sO = sS + kFlashTile * kFlashTile;                      // [64, 64]
+  half* sP = reinterpret_cast<half*>(sO + kFlashTile * kFlashTile);    // [64, 64]
+  float* sM = reinterpret_cast<float*>(sP + kFlashTile * kFlashTile);  // [64]
+  float* sL = sM + kFlashTile;                                   // [64]
+
+  const int q0 = tile * kFlashTile;
+  const int tid = threadIdx.x;
+
+  // Load the Q tile (zero-pad rows beyond seq).
+  for (int i = tid; i < kFlashTile * kFlashTile; i += blockDim.x) {
+    const int r = i / kFlashTile, c = i % kFlashTile;
+    const int row = q0 + r;
+    sQ[i] = (row < seq)
+                ? q[(static_cast<size_t>(b) * seq + row) * dim + c]
+                : __float2half(0.0f);
+  }
+  for (int r = tid; r < kFlashTile; r += blockDim.x) {
+    sM[r] = -1e30f;
+    sL[r] = 0.0f;
+    for (int c = 0; c < kFlashTile; ++c) sO[r * kFlashTile + c] = 0.0f;
+  }
+  __syncthreads();
+
+  const int key_tiles = (seq + kFlashTile - 1) / kFlashTile;
+  const int warp = tid / 32;
+  const int lane = tid % 32;
+  const int row_base = warp * 16;  // this warp's 16 query rows
+
+  for (int kt = 0; kt < key_tiles; ++kt) {
+    if (causal && kt * kFlashTile > q0 + kFlashTile - 1) break;  // fully masked
+    for (int i = tid; i < kFlashTile * kFlashTile; i += blockDim.x) {
+      const int r = i / kFlashTile, c = i % kFlashTile;
+      const int key = kt * kFlashTile + r;
+      sK[i] = (key < seq) ? k[(static_cast<size_t>(b) * seq + key) * dim + c]
+                          : __float2half(0.0f);
+      sV[i] = (key < seq) ? v[(static_cast<size_t>(b) * seq + key) * dim + c]
+                          : __float2half(0.0f);
+    }
+    __syncthreads();
+
+    // S = Q * K^T via wmma; each warp computes rows [row_base, +16).
+    {
+      wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a;
+      wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::col_major> bf;
+      wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc;
+      for (int n0 = 0; n0 < kFlashTile; n0 += 16) {
+        wmma::fill_fragment(acc, 0.0f);
+        for (int k0 = 0; k0 < kFlashTile; k0 += 16) {
+          wmma::load_matrix_sync(a, sQ + (row_base)*kFlashTile + k0, kFlashTile);
+          // B: col-major load of sK[n0.., k0..] gives K^T[k0 dims, n0 keys]
+          wmma::load_matrix_sync(bf, sK + n0 * kFlashTile + k0, kFlashTile);
+          wmma::mma_sync(acc, a, bf, acc);
+        }
+        wmma::store_matrix_sync(sS + row_base * kFlashTile + n0, acc, kFlashTile,
+                                wmma::mem_row_major);
+      }
+    }
+    __syncthreads();
+
+    // Online softmax: lane r of each warp owns query row row_base + r.
+    // Applies scale, range/causal masks, running max/sum and O rescale.
+    {
+      const int row = row_base + lane;
+      if (lane < 16) {  // one lane per row; this warp owns exactly 16 rows
+        float tile_max = -1e30f;
+        for (int c = 0; c < kFlashTile; ++c) {
+          float value = sS[row * kFlashTile + c] * scale;
+          if (kt * kFlashTile + c >= seq) value = -1e30f;
+          if (causal && kt * kFlashTile + c > q0 + row) value = -1e30f;
+          sS[row * kFlashTile + c] = value;
+          tile_max = fmaxf(tile_max, value);
+        }
+        const float m_old = sM[row];
+        const float m_new = fmaxf(m_old, tile_max);
+        const float correction = (sL[row] > 0.0f) ? __expf(m_old - m_new) : 0.0f;
+        float l_new = sL[row] * correction;
+        for (int c = 0; c < kFlashTile; ++c) {
+          const float p = __expf(sS[row * kFlashTile + c] - m_new);
+          sP[row * kFlashTile + c] = __float2half(p);
+          l_new += p;
+        }
+        for (int c = 0; c < kFlashTile; ++c)
+          sO[row * kFlashTile + c] *= correction;
+        sM[row] = m_new;
+        sL[row] = l_new;
+      }
+    }
+    __syncthreads();
+
+    // O += P * V via wmma (P row-major A, V row-major B).
+    {
+      wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a;
+      wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> bf;
+      wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc;
+      for (int n0 = 0; n0 < kFlashTile; n0 += 16) {
+        // load current O as accumulator, then accumulate P*V
+        wmma::load_matrix_sync(acc, sO + row_base * kFlashTile + n0, kFlashTile,
+                               wmma::mem_row_major);
+        for (int k0 = 0; k0 < kFlashTile; k0 += 16) {
+          wmma::load_matrix_sync(a, sP + row_base * kFlashTile + k0, kFlashTile);
+          wmma::load_matrix_sync(bf, sV + k0 * kFlashTile + n0, kFlashTile);
+          wmma::mma_sync(acc, a, bf, acc);
+        }
+        wmma::store_matrix_sync(sO + row_base * kFlashTile + n0, acc, kFlashTile,
+                                wmma::mem_row_major);
+      }
+    }
+    __syncthreads();
+  }
+
+  // Normalize by l and store.
+  for (int i = tid; i < kFlashTile * kFlashTile; i += blockDim.x) {
+    const int r = i / kFlashTile, c = i % kFlashTile;
+    const int row = q0 + r;
+    if (row < seq) {
+      const float l = sL[r];
+      out[(static_cast<size_t>(b) * seq + row) * dim + c] =
+          __float2half(l > 0.0f ? sO[r * kFlashTile + c] / l : 0.0f);
+    }
+  }
+}
+
 // im2col for the conv frontend. conv1 gathers [chunk,t] rows of 384 taps
 // from mel [chunks,128,3000]; conv2 gathers [chunk,t] rows of 3840 taps from
 // the (t,c)-layout conv1 output. Boundary taps stay zero (padding 1).
@@ -861,6 +1011,9 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
       const int batch = chunks * kHeads;
       const long long head_stride = static_cast<long long>(kFrames) * kHeadDim;
       const long long score_stride = static_cast<long long>(kFrames) * kFrames;
+      // NOTE: the wmma flash_attention_kernel below is numerically correct but
+      // currently slower than the materialized path (1 block/SM occupancy);
+      // it stays in the tree for a tuning pass (M2 backlog).
       CUBLAS_CHECK(cublasGemmStridedBatchedEx(
           cublas.get(), CUBLAS_OP_T, CUBLAS_OP_N, kFrames, kFrames, kHeadDim,
           static_cast<const void*>(&attn_scale), d_k_hm.get(), CUDA_R_16F, kHeadDim,
