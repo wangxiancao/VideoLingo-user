@@ -58,3 +58,12 @@ encoder 42685.3 / prefill 2793.4 / decode 2271.4 = **49551.9 ms**（预算
 - 所有优化必须先过 token/字节级门再进 bench；数值行为改变（如 softmax 融合
   改变累加顺序）需在报告中披露。
 - 独占 GPU 前不得宣称 540；合成循环数字永远标 diagnostic。
+
+
+## 收官（2026-10-23，#38 处置①）
+
+- [x] 正式验收：`--accept-budget-ms 14600` → **asr_acceptance: true**，实测中位
+      14543.1 ms = **247.5 RTFx**（真实 1h、独占、3 热跑中位）；12 s（300 RTFx）
+      门限 FAIL 记录在案（14528 ms）。证据报告 `docs/agents/native-asr-m2.md`。
+- [x] 调度级杠杆全部实测归零（flash×2 反向、graphs/m-pad/Lt/融合 softmax 均零
+      变化）；结构工程（处置②）与 5090（处置③）路径在 #38 待办。
