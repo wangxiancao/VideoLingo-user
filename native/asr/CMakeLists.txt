@@ -21,3 +21,10 @@ target_compile_options(glm_gemm_replay PRIVATE
 )
 target_link_libraries(glm_gemm_replay PRIVATE cublas)
 
+add_executable(glm_asr_m0 src/model_loader.cu src/main_m0.cu)
+target_include_directories(glm_asr_m0 PRIVATE src)
+target_compile_options(glm_asr_m0 PRIVATE
+  $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wpedantic>
+  $<$<COMPILE_LANGUAGE:CUDA>:--std=c++17;--expt-relaxed-constexpr;-gencode=arch=compute_86,code=sm_86;--compiler-options=-Wall,-Wextra>
+)
+

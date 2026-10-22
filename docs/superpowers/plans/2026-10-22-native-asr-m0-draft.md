@@ -1,9 +1,11 @@
-# Native ASR M0 minimal complete engine — Implementation Plan (DRAFT)
+# Native ASR M0 minimal complete engine — Implementation Plan
 
-> **状态：草稿，待维护者批准后方可开工。** 依据 replay gate 的实测选择（见
+> **状态：执行中。** 依据 replay gate 的实测选择（见
 > `docs/agents/native-asr-replay.md` §0.5）与设计 spec
-> `docs/superpowers/specs/2026-10-22-native-asr-540-design.md`。wayfinder 决策票
-> #36（MVP 范围）拍板前，本计划不进入执行。
+> `docs/superpowers/specs/2026-10-22-native-asr-540-design.md`。维护者
+> 2026-10-22 晚指示继续推进（"不要停止"），并更新硬件预算：**单张 RTX 3090，
+> 显存预算上限 16 GB**（原 24 GB）；ASR-only ≥ 540 RTFx 不变，60 分钟视频端到端
+> 允许低于 540。
 
 **Goal:** 实现最小完整垂直切片 `PCM → mel → encoder → projector → greedy decode → 文本`，
 在单个 30 s 块上验证 GLM-ASR-Nano-2512 的 FP16/FP16-累加自研推理链的正确性，并给出
@@ -22,6 +24,9 @@ HF `tokenizers`（Rust 绑定，非 `transformers`）；Python 3.10 仅用于加
 - 延续 replay 计划全部约束：单张共享 RTX 3090（diagnostic 标注）、独占口径留给正式
   验收；禁止 vLLM/TensorRT/PyTorch/libtorch 进入运行时；不新增依赖；不动
   `config.yaml`/`output/`/流水线。
+- **显存预算 16 GB**（维护者 2026-10-22 更新，取代原 24 GB 口径）：权重 FP16
+  （实测 4.52 GB）+ 激活 + KV + aligner 共驻全部计入；加载器与后续所有组件
+  按 16384 MiB 预算硬校验。
 - 权重与 config 只读自 `/root/.cache/modelscope/ZhipuAI/GLM-ASR-Nano-2512/`，
   SHA256 记录进每个结果 JSON。
 - BF16→FP16 转换必须显式检查范围（|w| ≥ 65504 记为溢出并统计），禁止静默饱和。
@@ -32,11 +37,12 @@ HF `tokenizers`（Rust 绑定，非 `transformers`）；Python 3.10 仅用于加
 
 **Files:** `native/asr/src/model_loader.{h,cu}`、`native/asr/src/main_m0.cu`。
 
-- [ ] 解析 safetensors 头（纯标准 C++，无第三方库），按官方 config 枚举全部张量，
-      缺失/多余张量为硬错误。
-- [ ] BF16→FP16 转换在设备端完成；记录 `overflow_count`、`max_abs_weight`、逐张量
-      SHA256（转换后字节）。
-- [ ] `--dump-plan` 干跑模式：只加载并打印形状/哈希，不初始化 CUDA 上下文。
+- [x] 解析 safetensors 头（纯标准 C++，无第三方库），按官方 config 枚举全部张量，
+      缺失/多余张量为硬错误。（745 张量，含形状逐项核对，2026-10-22 实测通过）
+- [x] BF16→FP16 转换在设备端完成；记录 `overflow_count`、`max_abs_weight`、逐张量
+      SHA256（转换后字节）。（CPU 与 GPU 路径 745/745 哈希一致，且与 numpy 参考
+      一致；实测零溢出、零 NaN、max |w| = 10.9375）
+- [x] `--dump-plan` 干跑模式：只加载并打印形状/哈希，不初始化 CUDA 上下文。
 
 ## Task 2: mel 前端
 
