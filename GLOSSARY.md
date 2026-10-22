@@ -1,5 +1,7 @@
 # VideoLingo
 
+> Reconstruction note (2026-10-23): the original glossary was verified never committed (2026-10-22); this file was rebuilt from the wayfinder map (#33) and its decision tickets and landed in a70ede7. Provenance recorded in the v0.6 closeout (#43).
+
 VideoLingo turns a video into translated subtitles and a burned-in video through a six-stage pipeline. This glossary fixes the vocabulary for the ASR-engine decision.
 
 ## Language
