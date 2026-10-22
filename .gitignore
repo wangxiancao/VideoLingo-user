@@ -194,3 +194,4 @@ queue_logs/
 
 # third-party reference checkouts
 external/video-miner/
+/bench/results/native-asr-m1/
