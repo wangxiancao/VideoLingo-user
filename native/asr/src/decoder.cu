@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <fstream>
 #include <cublas_v2.h>
 #include <cstdint>
@@ -202,6 +203,163 @@ __global__ void gather_q_groupmajor_kernel(const half* __restrict__ in,
                            (kTextHeads / kTextKvHeads) + hq;
   out[i] = in[batch * frames * kTextHeadDim + static_cast<size_t>(frame) * kTextHeadDim + dim];
 }
+
+
+// ---- Device-parameter variants for CUDA-graph capture ----
+// Position/length live in device memory so a captured graph stays valid
+// across steps; the freeze/early-stop logic moves fully on-device.
+
+__global__ void rope_at_position_dev_kernel(half* __restrict__ q, half* __restrict__ k,
+                                            const float* __restrict__ cos_t,
+                                            const float* __restrict__ sin_t,
+                                            const int* __restrict__ position, int rows) {
+  const int pos = *position;
+  const int d = threadIdx.x;
+  const int row = blockIdx.x;
+  if (d >= kTextRotaryDim / 2 || row >= rows) return;
+  const float c = cos_t[static_cast<size_t>(pos) * (kTextRotaryDim / 2) + d];
+  const float s = sin_t[static_cast<size_t>(pos) * (kTextRotaryDim / 2) + d];
+  half* q_row = q + static_cast<size_t>(row) * kTextHidden;
+  for (int h = 0; h < kTextHeads; ++h) {
+    half* ptr = q_row + static_cast<size_t>(h) * kTextHeadDim;
+    const float x1 = __half2float(ptr[d]);
+    const float x2 = __half2float(ptr[d + kTextRotaryDim / 2]);
+    ptr[d] = __float2half(x1 * c - x2 * s);
+    ptr[d + kTextRotaryDim / 2] = __float2half(x2 * c + x1 * s);
+  }
+  half* k_row = k + static_cast<size_t>(row) * (kTextKvHeads * kTextHeadDim);
+  for (int h = 0; h < kTextKvHeads; ++h) {
+    half* ptr = k_row + static_cast<size_t>(h) * kTextHeadDim;
+    const float x1 = __half2float(ptr[d]);
+    const float x2 = __half2float(ptr[d + kTextRotaryDim / 2]);
+    ptr[d] = __float2half(x1 * c - x2 * s);
+    ptr[d + kTextRotaryDim / 2] = __float2half(x2 * c + x1 * s);
+  }
+}
+
+__global__ void append_kv_batched_dev_kernel(const half* __restrict__ k,
+                                             const half* __restrict__ v,
+                                             half* __restrict__ k_cache,
+                                             half* __restrict__ v_cache,
+                                             const int* __restrict__ position, int chunks,
+                                             size_t chunk_stride) {
+  const int start = *position;
+  const size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const int width = kTextKvHeads * kTextHeadDim;
+  if (i >= static_cast<size_t>(chunks) * width) return;
+  const int chunk = static_cast<int>(i / width);
+  const size_t col = i % width;
+  k_cache[static_cast<size_t>(chunk) * chunk_stride + static_cast<size_t>(start) * width + col] =
+      k[i];
+  v_cache[static_cast<size_t>(chunk) * chunk_stride + static_cast<size_t>(start) * width + col] =
+      v[i];
+}
+
+__global__ void attention_step_batched_dev_kernel(
+    const half* __restrict__ q, const half* __restrict__ kv_cache, half* __restrict__ out,
+    const int* __restrict__ position, int layer, size_t layer_stride, size_t chunk_stride) {
+  extern __shared__ float shared[];
+  float* scores = shared;
+  float* sums = shared + kMaxSequence;
+  const int length = *position + 1;
+  const int index = blockIdx.x;
+  const int chunk = index / kTextHeads;
+  const int head = index % kTextHeads;
+  const int kv_head = head / (kTextHeads / kTextKvHeads);
+  const half* q_head =
+      q + static_cast<size_t>(chunk) * kTextHidden + static_cast<size_t>(head) * kTextHeadDim;
+  const half* k_cache =
+      kv_cache + static_cast<size_t>(chunk) * chunk_stride +
+      static_cast<size_t>(layer) * layer_stride;
+  const half* v_cache =
+      k_cache + static_cast<size_t>(kMaxSequence) * (kTextKvHeads * kTextHeadDim);
+  const size_t row_width = kTextKvHeads * kTextHeadDim;
+  for (int t = threadIdx.x; t < length; t += blockDim.x) {
+    float dot = 0.0f;
+    for (int d = 0; d < kTextHeadDim; ++d)
+      dot += __half2float(q_head[d]) *
+             __half2float(k_cache[static_cast<size_t>(t) * row_width +
+                                    static_cast<size_t>(kv_head) * kTextHeadDim + d]);
+    scores[t] = dot / 11.3137085f;
+  }
+  __syncthreads();
+  float maximum = -1e30f;
+  for (int t = 0; t < length; ++t) maximum = fmaxf(maximum, scores[t]);
+  float local = 0.0f;
+  for (int t = threadIdx.x; t < length; t += blockDim.x) {
+    scores[t] = __expf(scores[t] - maximum);
+    local += scores[t];
+  }
+  sums[threadIdx.x] = local;
+  __syncthreads();
+  float total = 0.0f;
+  for (int i = 0; i < blockDim.x; ++i) total += sums[i];
+  __syncthreads();
+  const float inv = 1.0f / total;
+  for (int t = threadIdx.x; t < length; t += blockDim.x) scores[t] *= inv;
+  __syncthreads();
+  half* out_head =
+      out + static_cast<size_t>(chunk) * kTextHidden + static_cast<size_t>(head) * kTextHeadDim;
+  for (int d = threadIdx.x; d < kTextHeadDim; d += blockDim.x) {
+    float acc = 0.0f;
+    for (int t = 0; t < length; ++t)
+      acc += scores[t] *
+             __half2float(v_cache[static_cast<size_t>(t) * row_width +
+                                    static_cast<size_t>(kv_head) * kTextHeadDim + d]);
+    out_head[d] = __float2half(acc);
+  }
+}
+
+// One decode step's output logic, fully on-device: freeze finished chunks to
+// EOS, record the id for unfinished ones, update finished flags.
+__global__ void argmax_step_kernel(const half* __restrict__ logits, char* __restrict__ finished,
+                                   int64_t* __restrict__ current_ids,
+                                   int64_t* __restrict__ out_ids, int chunks,
+                                   const int* __restrict__ position, int prompt_length) {
+  const int row = *position - prompt_length + 1;
+  const int chunk = blockIdx.x;
+  if (chunk >= chunks) return;
+  __shared__ float local_best[256];
+  __shared__ int local_index[256];
+  int winner = 59253;
+  if (!finished[chunk]) {
+    const half* row = logits + static_cast<size_t>(chunk) * kVocab;
+    float best = -1e30f;
+    int index = 0;
+    for (int j = threadIdx.x; j < kVocab; j += blockDim.x) {
+      const float v = __half2float(row[j]);
+      if (v > best) {
+        best = v;
+        index = j;
+      }
+    }
+    local_best[threadIdx.x] = best;
+    local_index[threadIdx.x] = index;
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      float overall = -1e30f;
+      for (int t = 0; t < blockDim.x; ++t)
+        if (local_best[t] > overall) {
+          overall = local_best[t];
+          winner = local_index[t];
+        }
+    }
+  }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    const bool is_eos =
+        winner == 59246 || winner == 59253 || winner == 59255;
+    if (finished[chunk]) {
+      winner = 59253;
+    } else {
+      out_ids[static_cast<size_t>(row) * chunks + chunk] = winner;
+      if (is_eos) finished[chunk] = 1;
+    }
+    current_ids[chunk] = winner;
+  }
+}
+
+__global__ void increment_int_kernel(int* value) { *value += 1; }
 
 // ---- Cross-chunk batched decode kernels ----
 
@@ -1217,116 +1375,161 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
   }
   CUDA_CHECK(cudaEventRecord(prefill_stop));
   CUDA_CHECK(cudaEventRecord(decode_start));
-  // ---- lockstep decode over the whole batch ----
-  const std::vector<int64_t> eos_ids = {59246, 59253, 59255};
-  std::vector<char> finished(chunks, 0);
-  auto all_finished = [&]() {
-    for (char f : finished)
-      if (!f) return false;
-    return true;
-  };
-  for (int c = 0; c < chunks; ++c)
-    if (std::find(eos_ids.begin(), eos_ids.end(), current[c]) != eos_ids.end())
-      finished[c] = 1;
-  int steps = 1;
-  for (; steps < options.max_new_tokens && !all_finished(); ++steps) {
-    const int position = L + steps - 1;
-    CUDA_CHECK(cudaMemcpy(d_gather_ids, current.data(), chunks * sizeof(int64_t),
-                          cudaMemcpyHostToDevice));
-    gather_ids_batched_kernel<<<chunks, 128>>>(
-        d_gather_ids, weight("language_model.model.embed_tokens.weight"), d_ids_batch,
-        chunks);
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaMemcpy(d_h, d_ids_batch, static_cast<size_t>(chunks) * kTextHidden * sizeof(half),
-                          cudaMemcpyDeviceToDevice));
-    for (int layer = 0; layer < kTextLayers; ++layer) {
-      const std::string p = "language_model.model.layers." + std::to_string(layer) + ".";
-      CUDA_CHECK(cudaMemcpy(d_ln, d_h, static_cast<size_t>(chunks) * kTextHidden * sizeof(half),
-                            cudaMemcpyDeviceToDevice));
-      rmsnorm_kernel<<<chunks, 256, 257 * sizeof(float)>>>(d_ln,
-                                                           weight(p + "input_layernorm.weight"),
-                                                           kTextHidden);
-      CUDA_CHECK(cudaGetLastError());
-      gemm(weight(p + "self_attn.q_proj.weight"), d_ln, d_q, chunks, kTextHidden, kTextHidden);
-      gemm(weight(p + "self_attn.k_proj.weight"), d_ln, d_k_row, chunks,
-           static_cast<int>(kv_width), kTextHidden);
-      gemm(weight(p + "self_attn.v_proj.weight"), d_ln, d_v_row, chunks,
-           static_cast<int>(kv_width), kTextHidden);
-      rope_at_position_kernel<<<chunks, 64>>>(d_q, d_k_row, d_cos, d_sin, position, chunks);
-      CUDA_CHECK(cudaGetLastError());
-      // append this step's k/v rows into every chunk's cache (row per chunk)
-      half* k_layer_base = d_kv_cache + static_cast<size_t>(layer) * layer_kv_stride;
-      half* v_layer_base = k_layer_base + static_cast<size_t>(kMaxSequence) * kv_width;
-      append_kv_batched_kernel<<<static_cast<unsigned>((static_cast<size_t>(chunks) * kv_width +
-                                                        127) / 128),
-                                 128>>>(d_k_row, d_v_row, k_layer_base, v_layer_base,
-                                        position, chunks, chunk_kv_stride);
-      CUDA_CHECK(cudaGetLastError());
-      attention_step_batched_kernel<<<chunks * kTextHeads, 128,
-                                      (kMaxSequence + 128) * sizeof(float)>>>(
-          d_q, d_kv_cache, d_attn, position + 1, layer, layer_kv_stride, chunk_kv_stride);
-      CUDA_CHECK(cudaGetLastError());
-      gemm(weight(p + "self_attn.o_proj.weight"), d_attn, d_ln, chunks, kTextHidden, kTextHidden);
-      residual_add_kernel<<<static_cast<unsigned>((static_cast<size_t>(chunks) * kTextHidden +
-                                                   255) / 256),
-                            256>>>(d_h, d_ln, static_cast<size_t>(chunks) * kTextHidden);
-      CUDA_CHECK(cudaGetLastError());
-      CUDA_CHECK(cudaMemcpy(d_ln, d_h, static_cast<size_t>(chunks) * kTextHidden * sizeof(half),
-                            cudaMemcpyDeviceToDevice));
-      rmsnorm_kernel<<<chunks, 256, 257 * sizeof(float)>>>(
-          d_ln, weight(p + "post_attention_layernorm.weight"), kTextHidden);
-      CUDA_CHECK(cudaGetLastError());
-      const size_t batch_mlp = static_cast<size_t>(chunks) * 6144;
-      gemm(weight(p + "mlp.gate_proj.weight"), d_ln, d_mlp_bg, chunks, 6144, kTextHidden);
-      gemm(weight(p + "mlp.up_proj.weight"), d_ln, d_mlp_bu, chunks, 6144, kTextHidden);
-      silu_mul_kernel<<<static_cast<unsigned>((batch_mlp + 255) / 256), 256>>>(d_mlp_bg,
-                                                                               d_mlp_bu, batch_mlp);
-      CUDA_CHECK(cudaGetLastError());
-      gemm(weight(p + "mlp.down_proj.weight"), d_mlp_bg, d_ln, chunks, kTextHidden, 6144);
-      residual_add_kernel<<<static_cast<unsigned>((static_cast<size_t>(chunks) * kTextHidden +
-                                                   255) / 256),
-                            256>>>(d_h, d_ln, static_cast<size_t>(chunks) * kTextHidden);
-      CUDA_CHECK(cudaGetLastError());
-    }
-    rmsnorm_kernel<<<chunks, 256, 257 * sizeof(float)>>>(
-        d_h, weight("language_model.model.norm.weight"), kTextHidden);
-    CUDA_CHECK(cudaGetLastError());
-    gemm(weight("language_model.lm_head.weight"), d_h, d_logits, chunks, kVocab, kTextHidden);
-    argmax_rows_kernel<<<chunks, 256>>>(d_logits, chunks, d_current_ids);
-    CUDA_CHECK(cudaGetLastError());
-    std::vector<int64_t> next(chunks);
-    CUDA_CHECK(cudaMemcpy(next.data(), d_current_ids, chunks * sizeof(int64_t),
-                          cudaMemcpyDeviceToHost));
-    if (steps == 1 && getenv("M2_DUMP_KV")) {
-      const std::string dir = getenv("M2_DUMP_KV");
-      CUDA_CHECK(cudaDeviceSynchronize());
-      for (int c = 0; c < std::min(chunks, 4); ++c) {
-        const half* k0 = d_kv_cache + static_cast<size_t>(c) * chunk_kv_stride;
-        std::vector<half> host(kv_width);
-        CUDA_CHECK(cudaMemcpy(host.data(), k0 + static_cast<size_t>(position) * kv_width,
-                              kv_width * sizeof(half), cudaMemcpyDeviceToHost));
-        std::ofstream out(dir + "/kvstep1_chunk" + std::to_string(c) + ".f16",
-                          std::ios::binary);
-        out.write(reinterpret_cast<const char*>(host.data()), host.size() * sizeof(half));
-      }
-    }
-    for (int c = 0; c < chunks; ++c) {
-      if (!finished[c]) {
-        result.per_chunk_ids[c].push_back(next[c]);
-        current[c] = next[c];
-        if (std::find(eos_ids.begin(), eos_ids.end(), next[c]) != eos_ids.end()) finished[c] = 1;
-      }
-    }
-  }
-  CUDA_CHECK(cudaEventRecord(decode_stop));
+  // ---- lockstep decode over the whole batch, CUDA-graph captured ----
   CUDA_CHECK(cudaEventSynchronize(prefill_stop));
-  CUDA_CHECK(cudaEventSynchronize(decode_stop));
   CUDA_CHECK(cudaEventElapsedTime(&result.prefill_ms, prefill_start, prefill_stop));
-  CUDA_CHECK(cudaEventElapsedTime(&result.decode_ms, decode_start, decode_stop));
-  cudaEventDestroy(prefill_start);
-  cudaEventDestroy(prefill_stop);
-  cudaEventDestroy(decode_start);
-  cudaEventDestroy(decode_stop);
-  result.steps = steps;
-  return result;
+  {
+    const std::vector<int64_t> eos_ids = {59246, 59253, 59255};
+    const bool use_graphs = getenv("M2_NO_GRAPHS") == nullptr;
+    int* d_position = static_cast<int*>(g.alloc(sizeof(int)));
+    char* d_finished = static_cast<char*>(g.alloc(chunks));
+    int64_t* d_out_ids =
+        static_cast<int64_t*>(g.alloc(static_cast<size_t>(options.max_new_tokens) * chunks *
+                                      sizeof(int64_t)));
+    int h_position = static_cast<int>(L);
+    std::vector<char> h_finished(chunks, 0);
+    for (int c = 0; c < chunks; ++c)
+      if (std::find(eos_ids.begin(), eos_ids.end(), current[c]) != eos_ids.end())
+        h_finished[c] = 1;
+    CUDA_CHECK(cudaMemcpy(d_position, &h_position, sizeof(int), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_finished, h_finished.data(), chunks, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_current_ids, current.data(), chunks * sizeof(int64_t),
+                          cudaMemcpyHostToDevice));
+    // Also seed the first-token row of out_ids from the prefill results.
+    CUDA_CHECK(cudaMemcpy(d_out_ids, d_current_ids, chunks * sizeof(int64_t),
+                          cudaMemcpyDeviceToDevice));
+
+    const size_t batch_hidden = static_cast<size_t>(chunks) * kTextHidden;
+    const size_t batch_mlp = static_cast<size_t>(chunks) * 6144;
+    cudaStream_t graph_stream = nullptr;
+    cudaGraphExec_t graph_exec = nullptr;
+
+    // One decode step, launched on `graph_stream` (or the default stream when
+    // graphs are disabled). All step-varying state lives in device memory.
+    const auto launch_step = [&](cudaStream_t stream) {
+      gather_ids_batched_kernel<<<chunks, 128, 0, stream>>>(
+          d_current_ids, weight("language_model.model.embed_tokens.weight"), d_ids_batch,
+          chunks);
+      CUDA_CHECK(cudaMemcpyAsync(d_h, d_ids_batch, batch_hidden * sizeof(half),
+                                 cudaMemcpyDeviceToDevice, stream));
+      for (int layer = 0; layer < kTextLayers; ++layer) {
+        const std::string p =
+            "language_model.model.layers." + std::to_string(layer) + ".";
+        CUDA_CHECK(cudaMemcpyAsync(d_ln, d_h, batch_hidden * sizeof(half),
+                                   cudaMemcpyDeviceToDevice, stream));
+        rmsnorm_kernel<<<chunks, 256, 257 * sizeof(float), stream>>>(
+            d_ln, weight(p + "input_layernorm.weight"), kTextHidden);
+        gemm(weight(p + "self_attn.q_proj.weight"), d_ln, d_q, chunks, kTextHidden,
+             kTextHidden);
+        gemm(weight(p + "self_attn.k_proj.weight"), d_ln, d_k_row, chunks,
+             static_cast<int>(kv_width), kTextHidden);
+        gemm(weight(p + "self_attn.v_proj.weight"), d_ln, d_v_row, chunks,
+             static_cast<int>(kv_width), kTextHidden);
+        rope_at_position_dev_kernel<<<chunks, 64, 0, stream>>>(d_q, d_k_row, d_cos, d_sin,
+                                                               d_position, chunks);
+        half* k_layer_base = d_kv_cache + static_cast<size_t>(layer) * layer_kv_stride;
+        half* v_layer_base = k_layer_base + static_cast<size_t>(kMaxSequence) * kv_width;
+        append_kv_batched_dev_kernel<<<static_cast<unsigned>((static_cast<size_t>(chunks) *
+                                                              kv_width + 127) / 128),
+                                       128, 0, stream>>>(d_k_row, d_v_row, k_layer_base,
+                                                         v_layer_base, d_position, chunks,
+                                                         chunk_kv_stride);
+        attention_step_batched_dev_kernel<<<chunks * kTextHeads, 128,
+                                            (kMaxSequence + 128) * sizeof(float), stream>>>(
+            d_q, d_kv_cache, d_attn, d_position, layer, layer_kv_stride, chunk_kv_stride);
+        gemm(weight(p + "self_attn.o_proj.weight"), d_attn, d_ln, chunks, kTextHidden,
+             kTextHidden);
+        residual_add_kernel<<<static_cast<unsigned>((batch_hidden + 255) / 256), 256, 0,
+                              stream>>>(d_h, d_ln, batch_hidden);
+        CUDA_CHECK(cudaMemcpyAsync(d_ln, d_h, batch_hidden * sizeof(half),
+                                   cudaMemcpyDeviceToDevice, stream));
+        rmsnorm_kernel<<<chunks, 256, 257 * sizeof(float), stream>>>(
+            d_ln, weight(p + "post_attention_layernorm.weight"), kTextHidden);
+        gemm(weight(p + "mlp.gate_proj.weight"), d_ln, d_mlp_bg, chunks, 6144, kTextHidden);
+        gemm(weight(p + "mlp.up_proj.weight"), d_ln, d_mlp_bu, chunks, 6144, kTextHidden);
+        silu_mul_kernel<<<static_cast<unsigned>((batch_mlp + 255) / 256), 256, 0, stream>>>(
+            d_mlp_bg, d_mlp_bu, batch_mlp);
+        gemm(weight(p + "mlp.down_proj.weight"), d_mlp_bg, d_ln, chunks, kTextHidden, 6144);
+        residual_add_kernel<<<static_cast<unsigned>((batch_hidden + 255) / 256), 256, 0,
+                              stream>>>(d_h, d_ln, batch_hidden);
+      }
+      rmsnorm_kernel<<<chunks, 256, 257 * sizeof(float), stream>>>(
+          d_h, weight("language_model.model.norm.weight"), kTextHidden);
+      gemm(weight("language_model.lm_head.weight"), d_h, d_logits, chunks, kVocab,
+           kTextHidden);
+      argmax_step_kernel<<<chunks, 256, 0, stream>>>(d_logits, d_finished, d_current_ids,
+                                                     d_out_ids, chunks, d_position, L);
+      increment_int_kernel<<<1, 1, 0, stream>>>(d_position);
+    };
+
+    // cuBLAS must target the capture stream for a capturable graph.
+    cudaStream_t capture_stream = nullptr;
+    if (use_graphs) {
+      CUDA_CHECK(cudaStreamCreateWithFlags(&capture_stream, cudaStreamNonBlocking));
+      CUBLAS_THROW(cublasSetStream(cublas, capture_stream));
+      // warmup step (also completes step index 1 semantics)
+      launch_step(capture_stream);
+      CUDA_CHECK(cudaStreamSynchronize(capture_stream));
+      CUDA_CHECK(cudaStreamBeginCapture(capture_stream, cudaStreamCaptureModeThreadLocal));
+      launch_step(capture_stream);
+      cudaGraph_t graph = nullptr;
+      CUDA_CHECK(cudaStreamEndCapture(capture_stream, &graph));
+      CUDA_CHECK(cudaGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+      cudaGraphDestroy(graph);
+    }
+
+    auto all_finished_host = [&]() {
+      std::vector<char> f(chunks);
+      CUDA_CHECK(cudaMemcpy(f.data(), d_finished, chunks, cudaMemcpyDeviceToHost));
+      for (char v : f)
+        if (!v) return false;
+      return true;
+    };
+    // out_ids row 0 holds the prefill tokens; each replay appends one row at
+    // the CURRENT step index tracked on-device via d_out_ids offsets. The
+    // step counter is folded into d_position: row = position - L + 1.
+    for (int step = 2; step < options.max_new_tokens; ++step) {
+      if (use_graphs) {
+        CUDA_CHECK(cudaGraphLaunch(graph_exec, capture_stream));
+      } else {
+        launch_step(nullptr);
+      }
+      if ((step & 3) == 0 || step == options.max_new_tokens - 1) {
+        CUDA_CHECK(cudaStreamSynchronize(use_graphs ? capture_stream : nullptr));
+        if (all_finished_host()) break;
+      }
+    }
+    CUDA_CHECK(cudaStreamSynchronize(use_graphs ? capture_stream : nullptr));
+    if (use_graphs) {
+      CUBLAS_THROW(cublasSetStream(cublas, nullptr));
+      cudaStreamDestroy(capture_stream);
+    }
+    // collect results: row 0 = prefill first tokens, rows 1.. = steps
+    std::vector<int64_t> all_ids(static_cast<size_t>(options.max_new_tokens) * chunks);
+    CUDA_CHECK(cudaMemcpy(all_ids.data(), d_out_ids,
+                          all_ids.size() * sizeof(int64_t), cudaMemcpyDeviceToHost));
+    std::vector<char> fin(chunks);
+    CUDA_CHECK(cudaMemcpy(fin.data(), d_finished, chunks, cudaMemcpyDeviceToHost));
+    for (int c = 0; c < chunks; ++c) {
+      // recompute per-chunk lengths from the frozen flags: find the first row
+      // where the eos appears
+      result.per_chunk_ids[c] = std::vector<int64_t>();
+      for (int r = 0; r < options.max_new_tokens; ++r) {
+        const int64_t id = all_ids[static_cast<size_t>(r) * chunks + c];
+        result.per_chunk_ids[c].push_back(id);  // terminating eos included (M0 semantics)
+        if (std::find(eos_ids.begin(), eos_ids.end(), id) != eos_ids.end()) break;
+      }
+    }
+    int max_len = 0;
+    for (int c = 0; c < chunks; ++c)
+      max_len = std::max<int>(max_len, static_cast<int>(result.per_chunk_ids[c].size()));
+    result.steps = max_len;
+    if (graph_exec) cudaGraphExecDestroy(graph_exec);
+    CUDA_CHECK(cudaEventRecord(decode_stop));
+    CUDA_CHECK(cudaEventSynchronize(decode_stop));
+    CUDA_CHECK(cudaEventElapsedTime(&result.decode_ms, decode_start, decode_stop));
+    return result;
+  }
+
+  return result;  // unreachable: the graph path returns above
 }
