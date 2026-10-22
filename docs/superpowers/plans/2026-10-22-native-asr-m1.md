@@ -24,36 +24,39 @@ decode 5.4、projector 0.2），非 GEMM 预算 **~24 ms/块**。M0 现状：逐
 
 ## Task 1: decoder 批量 prefill（单块）
 
-- [ ] 把逐 token prefill 循环替换为序列维 GEMM（复用 encoder 的 linear 机制，
-      m=序列长），因果 mask + 每行 softmax 的批量注意力（strided-batched），
-      KV 一次写入。
-- [ ] 门：`transcribe` 输出与 M0 逐 token 路径 token-identical（zh_30s 夹具，
-      acc16/acc32）。
+- [x] 序列维 GEMM + 因果 mask + 批量注意力 + KV 一次写入（`--prefill
+      batched|sequential` 双路径）；GQA 组内 K/V stride=0。门：zh_30s 夹具
+      token-identical（72 tokens），单块墙钟 11.5 s → 5.6 s。
+- [x] 门随附修复：GQA stride bug（组内 K/V 应共享）。
 
 ## Task 2: mel + encoder 多块批处理
 
-- [ ] mel kernel 增加 chunk 维（grid.z）；encoder GEMM m=batch×1500、注意力
-      batch=chunk×head、LayerNorm/激活按行扩展；sub-batch（默认 8 块）控制峰值。
-- [ ] 门：批处理 encoder 输出与单块路径 cosine ≥0.9999（同输入确定性比对）；
-      批处理 transcribe 文本 token-identical。
+- [x] mel chunk 维（grid.z，每块独立归一化）；encoder 行级 m=chunks×1500、
+      注意力逐块循环复用单块 scores 缓冲；sub-batch 8。
+- [x] 门：batch-4 chunk0 vs 单块——mel 字节一致、conv cos=1.000000、norm
+      0.999985、projector 0.999992、最差层 0.999985。
 
 ## Task 3: 跨块批量 decode + 每块 KV
 
-- [ ] KV 布局 [chunk][layer][2][seq][512]；prefill 按 sub-batch 写入；decode
-      步进批量 m=active_chunks，每块独立 EOS（完结块 logits 强制 EOS），步进至
-      全部完结或 max_new_tokens。
-- [ ] 显存核算：120 块 × 28 层 × 2 × 646 × 512 × 2 B ≈ 4.42 GiB + 权重 4.52
-      GiB + 激活 < 16 GB（加载器预算内校验）。
-- [ ] 门：N 块批 decode 每块文本 = 单块 M0 输出（N≥4，含不同完结时间步）。
+- [x] KV [chunks, layers, 2, max_seq, 512]；prefill 8 块子批；decode 全量
+      lockstep（统一长度），每块独立 EOS（宿主小环冻结完结块）。
+- [x] 显存：120 块 KV 4.42 GiB + 权重 4.52 GiB + 激活，实测通过（16 GB 内）。
+- [x] 门：4 块全部 token-identical（72 tokens、72 步、EOS 位置正确）。120 块：
+      116/120 token-identical；4 块在 token 6 同一近平局翻转（20370↔1935）后
+      立即重新同步——跨次运行发散块不同（cuBLAS 非确定性）、acc32 下 119/120，
+      判定为数值观察而非实现 bug，#37 Q3 CER 门在 M2 裁决。
+      修复 3 个真 bug：decode KV 追加漏 layer 偏移、首 token 行提取少乘
+      kTextHidden、组内 RoPE 未对 390 取模。
 
 ## Task 4: bench 计时与校准
 
-- [ ] `glm_asr_m0 bench --model-dir --pcm <30s> --chunks 120`：同一块循环 120
-      次（合成 1 h 场景，标注 synthetic-loop diagnostic），CUDA events 分量计时
-      mel/encoder/projector/prefill/decode，3 次热跑中位数，记录共享 GPU 进程
-      快照（compute PIDs）。
-- [ ] 校准：分量之和 vs replay 3757.8 ms（GEMM-only 估计）对比表，GEMM 实测/
-      估计比值与非 GEMM 开销占比落 JSON 与报告；给出距 55.6 ms/块的剩余差距。
+- [x] `bench` 子命令（CUDA events、3 次中位、diagnostic_shared_gpu 标注、
+      replay 参考值内嵌）；原始 JSON 归档 `bench/results/native-asr-m1/`。
+- [x] 校准（120 块、fp16-acc16、共享 GPU、中位）：mel 1801.8 / encoder
+      42685.3 / prefill 2793.4 / decode 2271.4，**总 49551.9 ms** vs replay
+      GEMM-only 3757.8 ms（13.2×）vs 540 预算 6666.7 ms（7.4×）。瓶颈定位：
+      encoder 朴素 strided softmax ~40 s；其次 prefill 逐块注意力、decode
+      launch 开销（72 步 × 28 层）、mel 朴素 400-tap。
 
 ## Task 5: 验证、报告与提交
 
