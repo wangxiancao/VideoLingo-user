@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <map>
 #include <fstream>
 #include <cublas_v2.h>
 #include <cstdint>
@@ -204,6 +205,100 @@ __global__ void gather_q_groupmajor_kernel(const half* __restrict__ in,
   out[i] = in[batch * frames * kTextHeadDim + static_cast<size_t>(frame) * kTextHeadDim + dim];
 }
 
+
+
+// ---- cuBLASLt skinny-GEMM path: heuristic algo selection, cached per shape.
+// The default cublasGemmEx kernel choice for m~120 decodes at ~36 GB/s
+// effective bandwidth; Lt lets us query the best algo once per shape. ----
+#include <cublasLt.h>
+
+
+static cudaStream_t lt_stream_for(cublasHandle_t handle) {
+  cudaStream_t stream = nullptr;
+  cublasGetStream(handle, &stream);
+  return stream;
+}
+
+class LtGemmCache {
+ public:
+  struct Entry {
+    cublasLtMatmulDesc_t op = nullptr;
+    cublasLtMatrixLayout_t a = nullptr, b = nullptr, c = nullptr;
+    cublasLtMatmulAlgo_t algo{};
+    size_t workspace = 0;
+  };
+  ~LtGemmCache() {
+    for (auto& kv : cache_) {
+      cublasLtMatmulDescDestroy(kv.second.op);
+      cublasLtMatrixLayoutDestroy(kv.second.a);
+      cublasLtMatrixLayoutDestroy(kv.second.b);
+      cublasLtMatrixLayoutDestroy(kv.second.c);
+    }
+    if (handle_) cublasLtDestroy(handle_);
+    if (workspace_) cudaFree(workspace_);
+  }
+  void init() {
+    if (handle_) return;
+    if (cublasLtCreate(&handle_) != CUBLAS_STATUS_SUCCESS)
+      throw ExecutionError("cublasLtCreate failed");
+    if (cudaMalloc(&workspace_, 32ull << 20) != cudaSuccess)
+      throw ExecutionError("Lt workspace alloc failed");
+  }
+  // y[m,n] = x[m,k] * W[n,k]^T (row-major, fp16 in/out, fp16 or fp32 acc)
+  void run(const half* w, const half* x, half* y, int m, int n, int k, bool acc16,
+           cudaStream_t stream) {
+    init();
+    const uint64_t key = (static_cast<uint64_t>(m) << 40) ^ (static_cast<uint64_t>(n) << 20) ^
+                         static_cast<uint64_t>(k) ^ (acc16 ? 1ull << 63 : 0);
+    Entry* e = nullptr;
+    const auto it = cache_.find(key);
+    if (it == cache_.end()) {
+      e = &cache_[key];
+      cublasOperation_t none = CUBLAS_OP_T, cb = CUBLAS_OP_N;
+      cublasLtMatmulDescCreate(&e->op, acc16 ? CUBLAS_COMPUTE_16F : CUBLAS_COMPUTE_32F,
+                               CUDA_R_16F);
+      cublasLtMatmulDescSetAttribute(e->op, CUBLASLT_MATMUL_DESC_TRANSA, &none, sizeof(none));
+      cublasLtMatmulDescSetAttribute(e->op, CUBLASLT_MATMUL_DESC_TRANSB, &cb, sizeof(cb));
+      // col-major views of the row-major operands: A=W [k,n] (transposed), B=x [k,m]
+      cublasLtMatrixLayoutCreate(&e->a, CUDA_R_16F, k, n, k);
+      cublasLtMatrixLayoutCreate(&e->b, CUDA_R_16F, k, m, k);
+      cublasLtMatrixLayoutCreate(&e->c, CUDA_R_16F, n, m, n);
+      cublasLtMatmulPreference_t pref;
+      cublasLtMatmulPreferenceCreate(&pref);
+      size_t ws = 32ull << 20;
+      cublasLtMatmulPreferenceSetAttribute(pref, CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                           &ws, sizeof(ws));
+      cublasLtMatmulHeuristicResult_t results[4];
+      int found = 0;
+      if (cublasLtMatmulAlgoGetHeuristic(handle_, e->op, e->a, e->b, e->c, e->c, pref, 4,
+                                         results, &found) != CUBLAS_STATUS_SUCCESS ||
+          found == 0) {
+        cublasLtMatmulPreferenceDestroy(pref);
+        throw ExecutionError("Lt heuristic found no algo");
+      }
+      e->algo = results[0].algo;
+      e->workspace = results[0].workspaceSize;
+      cublasLtMatmulPreferenceDestroy(pref);
+    } else {
+      e = &it->second;
+    }
+    const half alpha = __float2half(1.0f), beta = __float2half(0.0f);
+    const float alpha32 = 1.0f, beta32 = 0.0f;
+    cublasStatus_t status = cublasLtMatmul(
+        handle_, e->op,
+        acc16 ? static_cast<const void*>(&alpha) : static_cast<const void*>(&alpha32),
+        w, e->a, x, e->b,
+        acc16 ? static_cast<const void*>(&beta) : static_cast<const void*>(&beta32),
+        y, e->c, y, e->c, &e->algo, workspace_, 32ull << 20, stream);
+    if (status != CUBLAS_STATUS_SUCCESS)
+      throw ExecutionError("cublasLtMatmul failed");
+  }
+
+ private:
+  cublasLtHandle_t handle_ = nullptr;
+  void* workspace_ = nullptr;
+  std::map<uint64_t, Entry> cache_;
+};
 
 // ---- Device-parameter variants for CUDA-graph capture ----
 // Position/length live in device memory so a captured graph stays valid
@@ -1119,11 +1214,13 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
     ~HandleGuard() { if (handle) cublasDestroy(handle); }
   } guard{cublas};
 
+  const int m_pad = (chunks + 31) / 32 * 32;  // tensor-core tile aligned rows
   const auto gemm = [&](const half* w, const half* x, half* y, int m, int n, int k) {
+    const int rows_gemm = m == chunks ? m_pad : m;  // pad the decode-step batch only
     const half alpha16 = __float2half(1.0f), beta16 = __float2half(0.0f);
     const float alpha32 = 1.0f, beta32 = 0.0f;
     CUBLAS_THROW(cublasGemmEx(
-        cublas, CUBLAS_OP_T, CUBLAS_OP_N, n, m, k,
+        cublas, CUBLAS_OP_T, CUBLAS_OP_N, n, rows_gemm, k,
         options.fp16_accumulate ? static_cast<const void*>(&alpha16)
                                 : static_cast<const void*>(&alpha32),
         w, CUDA_R_16F, k, x, CUDA_R_16F, k,
@@ -1177,19 +1274,20 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
   float* d_sin = static_cast<float*>(g.alloc(static_cast<size_t>(kMaxSequence) * 64 * sizeof(float)));
   // lockstep decode buffers (full batch)
   const size_t batch_rows = static_cast<size_t>(chunks);
+  const size_t pad_rows = static_cast<size_t>(m_pad);
   half* d_ids_batch =
-      static_cast<half*>(g.alloc(batch_rows * kTextHidden * sizeof(half)));  // embed rows
-  half* d_h = static_cast<half*>(g.alloc(batch_rows * kTextHidden * sizeof(half)));
-  half* d_ln = static_cast<half*>(g.alloc(batch_rows * kTextHidden * sizeof(half)));
-  half* d_q = static_cast<half*>(g.alloc(batch_rows * kTextHidden * sizeof(half)));
+      static_cast<half*>(g.alloc(pad_rows * kTextHidden * sizeof(half)));  // embed rows
+  half* d_h = static_cast<half*>(g.alloc(pad_rows * kTextHidden * sizeof(half)));
+  half* d_ln = static_cast<half*>(g.alloc(pad_rows * kTextHidden * sizeof(half)));
+  half* d_q = static_cast<half*>(g.alloc(pad_rows * kTextHidden * sizeof(half)));
   half* d_kv = static_cast<half*>(g.alloc(batch_rows * kv_width * sizeof(half) * 2));
   half* d_k_row = d_kv;
   half* d_v_row = d_kv + batch_rows * kv_width;
-  half* d_attn = static_cast<half*>(g.alloc(batch_rows * kTextHidden * sizeof(half)));
-  half* d_mlp_b = static_cast<half*>(g.alloc(batch_rows * 6144 * sizeof(half) * 2));
+  half* d_attn = static_cast<half*>(g.alloc(pad_rows * kTextHidden * sizeof(half)));
+  half* d_mlp_b = static_cast<half*>(g.alloc(pad_rows * 6144 * sizeof(half) * 2));
   half* d_mlp_bg = d_mlp_b;
-  half* d_mlp_bu = d_mlp_b + batch_rows * 6144;
-  half* d_logits = static_cast<half*>(g.alloc(batch_rows * kVocab * sizeof(half)));
+  half* d_mlp_bu = d_mlp_b + pad_rows * 6144;
+  half* d_logits = static_cast<half*>(g.alloc(pad_rows * kVocab * sizeof(half)));
   int64_t* d_prompt_raw = reinterpret_cast<int64_t*>(d_prompt_ids);
   int64_t* d_current_ids = static_cast<int64_t*>(g.alloc(batch_rows * sizeof(int64_t)));
   int64_t* d_gather_ids = static_cast<int64_t*>(g.alloc(batch_rows * sizeof(int64_t)));
