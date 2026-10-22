@@ -103,4 +103,8 @@ PYTHONPATH=. .venv/bin/python bench/native_asr_e2e.py --video <x.mp4> \
 5. **门**：distinct-4 逐块一致 + Q3 CER ≥99%（近平局按 #37 Q3 口径）+ bench。
    物化路径保留为回退（`M2_ATTN=flash` 开关已有）。
 
-失败即回退：验收包在 13600 ms 门限（266 RTFx）已 PASS，随时可交付。
+**v3 已实现并实测（6dcea57）**：数值全过（distinct-4 逐块一致、cos ≥0.99998），
+注意力 332 ms/组 vs 物化 280 ms——**仍慢 1.19×**。三版独立实现全部反向，
+结论：该形状（seq 1500 / head_dim 64 / 批 160-2400）上手工融合打不过 cuBLAS
+批式 GEMM + 融合 softmax，除非重写 CUTLASS FMHA 级工程（TMA 流水、寄存器分块）。
+选项①以穷尽性证据关闭。**最终交付：13508.5 ms = 266.5 RTFx @ 13600 门限 PASS。**
