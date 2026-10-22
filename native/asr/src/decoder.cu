@@ -454,6 +454,179 @@ __global__ void argmax_step_kernel(const half* __restrict__ logits, char* __rest
   }
 }
 
+
+// ---- Compaction variants: per-chunk positions, active-row mapping ----
+
+__global__ void gather_ids_mapped_kernel(const int64_t* __restrict__ ids,
+                                         const int* __restrict__ active_ids,
+                                         const half* __restrict__ embed,
+                                         half* __restrict__ out, int active) {
+  const int row = blockIdx.x;
+  if (row >= active) return;
+  const half* source = embed + static_cast<size_t>(ids[active_ids[row]]) * kTextHidden;
+  half* dst = out + static_cast<size_t>(row) * kTextHidden;
+  for (int d = threadIdx.x; d < kTextHidden; d += blockDim.x) dst[d] = source[d];
+}
+
+__global__ void rope_at_position_map_kernel(half* __restrict__ q, half* __restrict__ k,
+                                            const float* __restrict__ cos_t,
+                                            const float* __restrict__ sin_t,
+                                            const int* __restrict__ positions,
+                                            const int* __restrict__ active_ids, int rows) {
+  const int d = threadIdx.x;
+  const int row = blockIdx.x;
+  if (d >= kTextRotaryDim / 2 || row >= rows) return;
+  const int pos = positions[active_ids[row]];
+  const float c = cos_t[static_cast<size_t>(pos) * (kTextRotaryDim / 2) + d];
+  const float s = sin_t[static_cast<size_t>(pos) * (kTextRotaryDim / 2) + d];
+  half* q_row = q + static_cast<size_t>(row) * kTextHidden;
+  for (int h = 0; h < kTextHeads; ++h) {
+    half* ptr = q_row + static_cast<size_t>(h) * kTextHeadDim;
+    const float x1 = __half2float(ptr[d]);
+    const float x2 = __half2float(ptr[d + kTextRotaryDim / 2]);
+    ptr[d] = __float2half(x1 * c - x2 * s);
+    ptr[d + kTextRotaryDim / 2] = __float2half(x2 * c + x1 * s);
+  }
+  half* k_row = k + static_cast<size_t>(row) * (kTextKvHeads * kTextHeadDim);
+  for (int h = 0; h < kTextKvHeads; ++h) {
+    half* ptr = k_row + static_cast<size_t>(h) * kTextHeadDim;
+    const float x1 = __half2float(ptr[d]);
+    const float x2 = __half2float(ptr[d + kTextRotaryDim / 2]);
+    ptr[d] = __float2half(x1 * c - x2 * s);
+    ptr[d + kTextRotaryDim / 2] = __float2half(x2 * c + x1 * s);
+  }
+}
+
+__global__ void append_kv_mapped_kernel(const half* __restrict__ k, const half* __restrict__ v,
+                                        half* __restrict__ k_cache, half* __restrict__ v_cache,
+                                        const int* __restrict__ positions,
+                                        const int* __restrict__ active_ids, int active,
+                                        size_t chunk_stride) {
+  const size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const int width = kTextKvHeads * kTextHeadDim;
+  if (i >= static_cast<size_t>(active) * width) return;
+  const int row = static_cast<int>(i / width);
+  const int chunk = active_ids[row];
+  const size_t col = i % width;
+  const size_t start = static_cast<size_t>(positions[chunk]) * width;
+  k_cache[static_cast<size_t>(chunk) * chunk_stride + start + col] = k[i];
+  v_cache[static_cast<size_t>(chunk) * chunk_stride + start + col] = v[i];
+}
+
+__global__ void attention_step_mapped_kernel(
+    const half* __restrict__ q, const half* __restrict__ kv_cache, half* __restrict__ out,
+    const int* __restrict__ positions, const int* __restrict__ active_ids, int active,
+    int layer, size_t layer_stride, size_t chunk_stride) {
+  extern __shared__ float shared[];
+  float* scores = shared;
+  float* sums = shared + kMaxSequence;
+  const int index = blockIdx.x;
+  const int row = index / kTextHeads;          // active row
+  const int chunk = active_ids[row];
+  const int head = index % kTextHeads;
+  const int length = positions[chunk] + 1;
+  const int kv_head = head / (kTextHeads / kTextKvHeads);
+  const half* q_head =
+      q + static_cast<size_t>(row) * kTextHidden + static_cast<size_t>(head) * kTextHeadDim;
+  const half* k_cache =
+      kv_cache + static_cast<size_t>(chunk) * chunk_stride +
+      static_cast<size_t>(layer) * layer_stride;
+  const half* v_cache =
+      k_cache + static_cast<size_t>(kMaxSequence) * (kTextKvHeads * kTextHeadDim);
+  const size_t row_width = kTextKvHeads * kTextHeadDim;
+  for (int t = threadIdx.x; t < length; t += blockDim.x) {
+    float dot = 0.0f;
+    for (int d = 0; d < kTextHeadDim; ++d)
+      dot += __half2float(q_head[d]) *
+             __half2float(k_cache[static_cast<size_t>(t) * row_width +
+                                    static_cast<size_t>(kv_head) * kTextHeadDim + d]);
+    scores[t] = dot / 11.3137085f;
+  }
+  __syncthreads();
+  float maximum = -1e30f;
+  for (int t = 0; t < length; ++t) maximum = fmaxf(maximum, scores[t]);
+  float local = 0.0f;
+  for (int t = threadIdx.x; t < length; t += blockDim.x) {
+    scores[t] = __expf(scores[t] - maximum);
+    local += scores[t];
+  }
+  sums[threadIdx.x] = local;
+  __syncthreads();
+  float total = 0.0f;
+  for (int i = 0; i < blockDim.x; ++i) total += sums[i];
+  __syncthreads();
+  const float inv = 1.0f / total;
+  for (int t = threadIdx.x; t < length; t += blockDim.x) scores[t] *= inv;
+  __syncthreads();
+  half* out_head =
+      out + static_cast<size_t>(row) * kTextHidden + static_cast<size_t>(head) * kTextHeadDim;
+  for (int d = threadIdx.x; d < kTextHeadDim; d += blockDim.x) {
+    float acc = 0.0f;
+    for (int t = 0; t < length; ++t)
+      acc += scores[t] *
+             __half2float(v_cache[static_cast<size_t>(t) * row_width +
+                                    static_cast<size_t>(kv_head) * kTextHeadDim + d]);
+    out_head[d] = __float2half(acc);
+  }
+}
+
+// argmax over ACTIVE rows; maps row -> chunk for out_ids/finished/current.
+__global__ void argmax_mapped_kernel(const half* __restrict__ logits, char* __restrict__ finished,
+                                     int64_t* __restrict__ current_ids,
+                                     int64_t* __restrict__ out_ids, int active,
+                                     const int* __restrict__ active_ids,
+                                     const int* __restrict__ positions, int chunks,
+                                     int prompt_length) {
+  const int row = blockIdx.x;
+  if (row >= active) return;
+  const int chunk = active_ids[row];
+  const int out_row = positions[chunk] - prompt_length + 1;
+  __shared__ float local_best[256];
+  __shared__ int local_index[256];
+  int winner = 59253;
+  if (!finished[chunk]) {
+    const half* r = logits + static_cast<size_t>(row) * kVocab;
+    float best = -1e30f;
+    int index = 0;
+    for (int j = threadIdx.x; j < kVocab; j += blockDim.x) {
+      const float v = __half2float(r[j]);
+      if (v > best) {
+        best = v;
+        index = j;
+      }
+    }
+    local_best[threadIdx.x] = best;
+    local_index[threadIdx.x] = index;
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      float overall = -1e30f;
+      for (int t = 0; t < blockDim.x; ++t)
+        if (local_best[t] > overall) {
+          overall = local_best[t];
+          winner = local_index[t];
+        }
+    }
+  }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    const bool is_eos = winner == 59246 || winner == 59253 || winner == 59255;
+    if (finished[chunk]) {
+      winner = 59253;
+    } else {
+      out_ids[static_cast<size_t>(out_row) * chunks + chunk] = winner;
+      if (is_eos) finished[chunk] = 1;
+    }
+    current_ids[chunk] = winner;
+  }
+}
+
+__global__ void advance_positions_kernel(int* __restrict__ positions,
+                                         const int* __restrict__ active_ids, int active) {
+  const int row = blockIdx.x * blockDim.x + threadIdx.x;
+  if (row >= active) return;
+  positions[active_ids[row]] += 1;
+}
+
 __global__ void increment_int_kernel(int* value) { *value += 1; }
 
 // ---- Cross-chunk batched decode kernels ----
@@ -1489,6 +1662,134 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
     const size_t batch_mlp = static_cast<size_t>(chunks) * 6144;
     cudaStream_t graph_stream = nullptr;
     cudaGraphExec_t graph_exec = nullptr;
+
+    // ---- compacted lockstep (default): per-chunk positions, finished chunks
+    // leave the batch. Graphs stay available via M2_GRAPHS=1 for A/B.
+    const bool use_compaction = getenv("M2_GRAPHS") == nullptr;
+    if (use_compaction) {
+      int* d_positions = static_cast<int*>(g.alloc(chunks * sizeof(int)));
+      int* d_active_ids = static_cast<int*>(g.alloc(chunks * sizeof(int)));
+      int* d_active_count = static_cast<int*>(g.alloc(sizeof(int)));
+      std::vector<int> active(chunks);
+      for (int c = 0; c < chunks; ++c) active[c] = c;
+      std::vector<int> host_positions(chunks, static_cast<int>(L));
+      CUDA_CHECK(cudaMemcpy(d_positions, host_positions.data(), chunks * sizeof(int),
+                            cudaMemcpyHostToDevice));
+
+      const auto launch_compact_step = [&](int active_count) {
+        const size_t act_hidden = static_cast<size_t>(active_count) * kTextHidden;
+        const size_t act_mlp = static_cast<size_t>(active_count) * 6144;
+        gather_ids_mapped_kernel<<<active_count, 128>>>(
+            d_current_ids, d_active_ids,
+            weight("language_model.model.embed_tokens.weight"), d_ids_batch, active_count);
+        CUDA_CHECK(cudaMemcpyAsync(d_h, d_ids_batch, act_hidden * sizeof(half),
+                                   cudaMemcpyDeviceToDevice, nullptr));
+        for (int layer = 0; layer < kTextLayers; ++layer) {
+          const std::string p =
+              "language_model.model.layers." + std::to_string(layer) + ".";
+          CUDA_CHECK(cudaMemcpyAsync(d_ln, d_h, act_hidden * sizeof(half),
+                                     cudaMemcpyDeviceToDevice, nullptr));
+          rmsnorm_kernel<<<active_count, 256, 257 * sizeof(float)>>>(
+              d_ln, weight(p + "input_layernorm.weight"), kTextHidden);
+          gemm(weight(p + "self_attn.q_proj.weight"), d_ln, d_q, active_count, kTextHidden,
+               kTextHidden);
+          gemm(weight(p + "self_attn.k_proj.weight"), d_ln, d_k_row, active_count,
+               static_cast<int>(kv_width), kTextHidden);
+          gemm(weight(p + "self_attn.v_proj.weight"), d_ln, d_v_row, active_count,
+               static_cast<int>(kv_width), kTextHidden);
+          rope_at_position_map_kernel<<<active_count, 64>>>(d_q, d_k_row, d_cos, d_sin,
+                                                            d_positions, d_active_ids,
+                                                            active_count);
+          half* k_layer_base = d_kv_cache + static_cast<size_t>(layer) * layer_kv_stride;
+          half* v_layer_base = k_layer_base + static_cast<size_t>(kMaxSequence) * kv_width;
+          append_kv_mapped_kernel<<<static_cast<unsigned>(
+                                        (static_cast<size_t>(active_count) * kv_width + 127) /
+                                        128),
+                                    128>>>(d_k_row, d_v_row, k_layer_base, v_layer_base,
+                                           d_positions, d_active_ids, active_count,
+                                           chunk_kv_stride);
+          attention_step_mapped_kernel<<<active_count * kTextHeads, 128,
+                                         (kMaxSequence + 128) * sizeof(float)>>>(
+              d_q, d_kv_cache, d_attn, d_positions, d_active_ids, active_count, layer,
+              layer_kv_stride, chunk_kv_stride);
+          gemm(weight(p + "self_attn.o_proj.weight"), d_attn, d_ln, active_count, kTextHidden,
+               kTextHidden);
+          residual_add_kernel<<<static_cast<unsigned>((act_hidden + 255) / 256), 256>>>(
+              d_h, d_ln, act_hidden);
+          CUDA_CHECK(cudaMemcpyAsync(d_ln, d_h, act_hidden * sizeof(half),
+                                     cudaMemcpyDeviceToDevice, nullptr));
+          rmsnorm_kernel<<<active_count, 256, 257 * sizeof(float)>>>(
+              d_ln, weight(p + "post_attention_layernorm.weight"), kTextHidden);
+          gemm(weight(p + "mlp.gate_proj.weight"), d_ln, d_mlp_bg, active_count, 6144,
+               kTextHidden);
+          gemm(weight(p + "mlp.up_proj.weight"), d_ln, d_mlp_bu, active_count, 6144,
+               kTextHidden);
+          silu_mul_kernel<<<static_cast<unsigned>((act_mlp + 255) / 256), 256>>>(d_mlp_bg,
+                                                                                 d_mlp_bu,
+                                                                                 act_mlp);
+          gemm(weight(p + "mlp.down_proj.weight"), d_mlp_bg, d_ln, active_count, kTextHidden,
+               6144);
+          residual_add_kernel<<<static_cast<unsigned>((act_hidden + 255) / 256), 256>>>(
+              d_h, d_ln, act_hidden);
+        }
+        rmsnorm_kernel<<<active_count, 256, 257 * sizeof(float)>>>(
+            d_h, weight("language_model.model.norm.weight"), kTextHidden);
+        gemm(weight("language_model.lm_head.weight"), d_h, d_logits, active_count, kVocab,
+             kTextHidden);
+        argmax_mapped_kernel<<<active_count, 256>>>(d_logits, d_finished, d_current_ids,
+                                                    d_out_ids, active_count, d_active_ids,
+                                                    d_positions, chunks, L);
+        advance_positions_kernel<<<(active_count + 127) / 128, 128>>>(d_positions,
+                                                                      d_active_ids,
+                                                                      active_count);
+      };
+
+      for (int step = 1; step < options.max_new_tokens; ++step) {
+        const int active_count = static_cast<int>(active.size());
+        CUDA_CHECK(cudaMemcpy(d_active_ids, active.data(), active_count * sizeof(int),
+                              cudaMemcpyHostToDevice));
+        launch_compact_step(active_count);
+        CUDA_CHECK(cudaDeviceSynchronize());
+        std::vector<char> fin(chunks);
+        CUDA_CHECK(cudaMemcpy(fin.data(), d_finished, chunks, cudaMemcpyDeviceToHost));
+        std::vector<int> still;
+        for (int c : active)
+          if (!fin[c]) still.push_back(c);
+        if (still.empty()) break;
+        if (getenv("M2_NO_SHRINK")) still = active;  // A/B: mapped kernels, no drop
+        active.swap(still);
+      }
+      CUDA_CHECK(cudaEventRecord(decode_stop));
+      CUDA_CHECK(cudaEventSynchronize(decode_stop));
+      CUDA_CHECK(cudaEventElapsedTime(&result.decode_ms, decode_start, decode_stop));
+      if (getenv("M2_DBG_OUT")) {
+        std::vector<int64_t> dbg(static_cast<size_t>(4) * chunks);
+        CUDA_CHECK(cudaMemcpy(dbg.data(), d_out_ids, dbg.size() * sizeof(int64_t),
+                              cudaMemcpyDeviceToHost));
+        for (int r = 0; r < 4; ++r) {
+          std::cerr << "out row " << r << ":";
+          for (int c = 0; c < chunks; ++c) std::cerr << " " << dbg[r * chunks + c];
+          std::cerr << "\n";
+        }
+      }
+      // collect
+      std::vector<int64_t> all_ids(static_cast<size_t>(options.max_new_tokens) * chunks);
+      CUDA_CHECK(cudaMemcpy(all_ids.data(), d_out_ids, all_ids.size() * sizeof(int64_t),
+                            cudaMemcpyDeviceToHost));
+      for (int c = 0; c < chunks; ++c) {
+        result.per_chunk_ids[c].clear();  // prefill already pushed row 0
+        for (int r = 0; r < options.max_new_tokens; ++r) {
+          const int64_t id = all_ids[static_cast<size_t>(r) * chunks + c];
+          result.per_chunk_ids[c].push_back(id);
+          if (id == 59246 || id == 59253 || id == 59255) break;
+        }
+      }
+      int max_len = 0;
+      for (int c = 0; c < chunks; ++c)
+        max_len = std::max<int>(max_len, static_cast<int>(result.per_chunk_ids[c].size()));
+      result.steps = max_len;
+      return result;
+    }
 
     // One decode step, launched on `graph_stream` (or the default stream when
     // graphs are disabled). All step-varying state lives in device memory.

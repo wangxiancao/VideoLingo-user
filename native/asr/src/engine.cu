@@ -686,7 +686,9 @@ __global__ void softmax_rows_fused_kernel(half* __restrict__ scores, int heads, 
 
 const float kOneF32 = 1.0f;
 const float kZeroF32 = 0.0f;
+const half kAttnScaleH = __float2half(1.0f / sqrtf(static_cast<float>(kHeadDim)));
 const half kZeroHalf = __float2half(0.0f);
+const half kOneHalf = __float2half(1.0f);
 
 // y = x * W^T (+ bias), row-major [m,k] x [n,k]^T -> [m,n], FP16 in/out.
 void linear(CublasHandle& handle, bool acc16, const half* w, const half* bias,
@@ -1277,19 +1279,19 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
       // it stays in the tree for a tuning pass (M2 backlog).
       CUBLAS_CHECK(cublasGemmStridedBatchedEx(
           cublas.get(), CUBLAS_OP_T, CUBLAS_OP_N, kFrames, kFrames, kHeadDim,
-          static_cast<const void*>(&attn_scale), d_k_hm.get(), CUDA_R_16F, kHeadDim,
+          static_cast<const void*>(&kAttnScaleH), d_k_hm.get(), CUDA_R_16F, kHeadDim,
           head_stride, d_q_hm.get(), CUDA_R_16F, kHeadDim, head_stride,
-          static_cast<const void*>(&kZeroF32), d_scores.get(), CUDA_R_16F, kFrames,
-          score_stride, batch, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
+          static_cast<const void*>(&kZeroHalf), d_scores.get(), CUDA_R_16F, kFrames,
+          score_stride, batch, CUBLAS_COMPUTE_16F, CUBLAS_GEMM_DEFAULT));
       softmax_rows_fused_kernel<<<dim3(kFrames, batch), 256,
                                   kFrames * sizeof(float)>>>(d_scores.get(), batch, kFrames);
       CUDA_CHECK(cudaGetLastError());
       CUBLAS_CHECK(cublasGemmStridedBatchedEx(
           cublas.get(), CUBLAS_OP_N, CUBLAS_OP_N, kHeadDim, kFrames, kFrames,
-          static_cast<const void*>(&kOneF32), d_v_hm.get(), CUDA_R_16F, kHeadDim,
+          static_cast<const void*>(&kOneHalf), d_v_hm.get(), CUDA_R_16F, kHeadDim,
           head_stride, d_scores.get(), CUDA_R_16F, kFrames, score_stride,
           static_cast<const void*>(&kZeroHalf), d_attn_hm.get(), CUDA_R_16F, kHeadDim,
-          head_stride, batch, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
+          head_stride, batch, CUBLAS_COMPUTE_16F, CUBLAS_GEMM_DEFAULT));
       gather_heads_kernel<<<static_cast<unsigned>((total + 255) / 256), 256>>>(
           d_attn_hm.get(), d_attn.get(), rows, chunks);
       CUDA_CHECK(cudaGetLastError());
