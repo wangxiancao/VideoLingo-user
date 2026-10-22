@@ -20,7 +20,7 @@ api:
 max_workers: 4
 
 # *Managed local translation LLM (new pipeline only; spec V4).
-# *When enabled, segment/translate stages call a project-spawned OpenAI-compatible
+# *When enabled, the translate stage calls a project-spawned OpenAI-compatible
 # *server instead of api.* above; api.key is not read. The service starts before
 # *segment and stops after translate in every run; there is no cloud fallback.
 llm:
@@ -33,6 +33,13 @@ llm:
     port: 0
     # *Seconds to wait for model load + health before failing explicitly
     startup_timeout_s: 180
+
+# *Rule-based sentence segmentation for the segment stage (V4-3): cut on
+# *terminal punctuation, silence gaps, and length caps. Deterministic; no LLM.
+segmentation:
+  pause_s: 0.45
+  max_words: 20
+  max_duration_s: 8.0
 
 # Language settings, written into the prompt, can be described in natural language
 target_language: '简体中文'
