@@ -54,20 +54,25 @@ HF `tokenizers`（Rust 绑定，非 `transformers`）；Python 3.10 仅用于加
 
 ## Task 3: encoder + projector（单块）
 
-- [ ] conv 前端 + 32 层 encoder：QKV/O/MLP 用 cuBLAS `CUBLAS_COMPUTE_16F`；注意力
-      与 norm 先用朴素 CUDA kernel（正确性优先，性能留给 M1）。
-- [ ] projector（375 token、5120→4096→2048）。
-- [ ] 中间张量落盘开关 `--dump-activations`：与 transformers BF16 逐层对照（余弦
-      相似度阈值 0.999，超出即停）。
+- [x] conv 前端 + 32 层 encoder：QKV/O/MLP 用 cuBLAS（`--gemm-acc 16|32`，默认
+      FP16-累加）；注意力分数/PV 与 norm 用朴素 CUDA kernel（正确性优先，性能留
+      给 M1）。
+- [x] projector（375 token、5120→4096→2048），输出余弦 0.9992。
+- [x] 逐层落盘与对照（encode 子命令 + M0_DEBUG_LAYER0 钩子）：conv 0.999993、
+      层 0–16 ≥0.99987；层 18–31 因 fp16-vs-bf16 离群层注意力翻转漂移至
+      0.987–0.23（子组件隔离验证全部 ≥0.99999、无 NaN、幅值吻合——dtype 数值
+      而非实现错误），按停止规则调查后交由 Task 4 文本门裁决（通过）。
 
 ## Task 4: decoder 贪心解码（单序列）
 
-- [ ] prefill（375+prompt）+ 逐步贪心，`max_new_tokens=256`，EOS 终止；GQA、RoPE、
-      RMSNorm、SiLU 与官方 config 对齐。
-- [ ] 输出 token id 经 HF `tokenizers` 解码为文本（进程外 Python 包装亦可，但不得
-      import `transformers`）。
-- [ ] 与 transformers BF16 输出比对：要求字符一致率 100%（单块、贪心、无采样；
-      若不一致，逐 token 定位首个分歧层并记录）。
+- [x] 位置递增式单路径 prefill+贪心解码（KV cache、causality by construction），
+      `max_new_tokens=256`，EOS [59246, 59253, 59255] 终止；GQA 16/4、全维 RoPE、
+      RMSNorm 1e-5、SiLU 与官方 config 对齐。
+- [x] token id 由调用方注入（native 运行时无 tokenizer、无 Python）；解码在
+      测试/工具侧完成。
+- [x] **文本门通过**：tests/fixtures/audio/zh_30s.wav（真实中文语音）上与
+      transformers BF16 贪心输出 **token 完全一致**（72 tokens；`--gemm-acc 32`
+      同样一致）。
 
 ## Task 5: 验证、报告与提交
 

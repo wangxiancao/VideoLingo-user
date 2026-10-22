@@ -214,3 +214,65 @@ def test_mel_rejects_invalid_inputs(tmp_path):
     np.zeros(480001, dtype=np.float32).tofile(oversize)
     result = run_loader("mel", "--pcm", str(oversize), "--out", str(tmp_path / "o.f32"))
     assert result.returncode == 2
+
+
+# ---------------------------------------------------------------------------
+# M0 Task 4: end-to-end greedy decode vs transformers BF16 reference
+# ---------------------------------------------------------------------------
+
+SPEECH_FIXTURE = REPO / "tests" / "fixtures" / "audio" / "zh_30s.wav"
+
+
+def load_speech_pcm():
+    import subprocess as sp
+
+    result = sp.run(
+        ["ffmpeg", "-v", "error", "-i", str(SPEECH_FIXTURE), "-ac", "1", "-ar",
+         "16000", "-f", "f32le", "-"],
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr.decode()
+    import numpy as np
+
+    pcm = np.frombuffer(result.stdout, dtype=np.float32)
+    assert pcm.size == 480000, pcm.size
+    return pcm
+
+
+@pytest.mark.skipif(
+    not SPEECH_FIXTURE.is_file(), reason="30 s Mandarin speech fixture missing"
+)
+def test_transcribe_token_identical_to_bf16_reference(tmp_path):
+    import numpy as np
+    import torch
+    from transformers import AutoProcessor, GlmAsrForConditionalGeneration
+
+    pcm = load_speech_pcm()
+    pcm.tofile(tmp_path / "pcm.f32")
+    processor = AutoProcessor.from_pretrained(str(MODEL_DIR))
+    inputs = processor.apply_transcription_request([pcm])
+    prompt_ids = inputs.input_ids[0].tolist()
+    (tmp_path / "prompt.txt").write_text("\n".join(map(str, prompt_ids)))
+
+    result = run_loader(
+        "transcribe", "--model-dir", str(MODEL_DIR), "--pcm", str(tmp_path / "pcm.f32"),
+        "--prompt-ids", str(tmp_path / "prompt.txt"),
+    )
+    if result.returncode == 1 and "driver" in result.stderr.lower():
+        pytest.skip("no usable CUDA device")
+    assert result.returncode == 0, result.stderr
+    native = json.loads(result.stdout)
+    assert native["measurement_kind"] == "correctness_only"
+    assert native["generated_ids"], "decoder produced no tokens"
+
+    model = GlmAsrForConditionalGeneration.from_pretrained(
+        str(MODEL_DIR), dtype=torch.bfloat16
+    ).cuda().eval()
+    with torch.inference_mode():
+        output = model.generate(**inputs.to("cuda", torch.bfloat16), do_sample=False,
+                                max_new_tokens=256)
+    reference = output[0, inputs["input_ids"].shape[1]:].tolist()
+    assert native["generated_ids"] == reference, (
+        f"first divergence at "
+        f"{next(i for i, (a, b) in enumerate(zip(native['generated_ids'], reference)) if a != b)}"
+    )
