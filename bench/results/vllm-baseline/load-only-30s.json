@@ -1,0 +1,21 @@
+{
+  "audio": "/tmp/t2b-real/zh_real_30s.wav",
+  "duration_s": 30.0,
+  "chunks": 1,
+  "chunk_seconds": 30.0,
+  "batch_size": 20,
+  "load_time_s": 137.01520589692518,
+  "loaded_peak_alloc_mib": 0.0,
+  "loaded_peak_reserved_mib": 0.0,
+  "gpu_used_before_mib": 9663,
+  "gpu_used_after_load_mib": 20571,
+  "gpu_total_mib": 24576,
+  "model": "/root/.cache/modelscope/ZhipuAI/GLM-ASR-Nano-2512",
+  "config": {
+    "max_model_len": 4096,
+    "max_num_seqs": 32,
+    "gpu_util": 0.45,
+    "enforce_eager": false
+  },
+  "status": "load_ok"
+}

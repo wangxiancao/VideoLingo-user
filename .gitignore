@@ -67,9 +67,11 @@ instance/
 .scrapy
 
 # Sphinx documentation
-# `docs/*` (not `docs/`) so the negation can re-include docs/agents/.
+# `docs/*` (not `docs/`) so the negations can re-include docs/agents/ and docs/adr/.
 docs/*
 !docs/agents/
+!docs/adr/
+!docs/adr/**
 
 # PyBuilder
 .pybuilder/
@@ -182,3 +184,6 @@ CLAUDE.md
 .omo/
 queue_state.json
 queue_logs/
+
+# third-party reference checkouts
+external/video-miner/

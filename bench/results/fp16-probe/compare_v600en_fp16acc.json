@@ -1,0 +1,715 @@
+{
+  "audio": {
+    "path": "/tmp/fp16-probe/en_v600.wav",
+    "duration_s": 600.003625,
+    "sample_rate": 16000,
+    "chunks": 20,
+    "chunk_seconds": 30.0,
+    "chunk_lengths_s": [
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.003625
+    ]
+  },
+  "config": {
+    "glm_dtype": "fp16",
+    "aligner_dtype": "fp16",
+    "glm_model_dtype": "torch.float16",
+    "aligner_model_dtype": "torch.float16",
+    "fp16_accum": true,
+    "batch_size": 20,
+    "chunk_seconds": 30.0,
+    "max_new_tokens": 512,
+    "language": "English",
+    "warmups": 1,
+    "runs": 2
+  },
+  "fp16_summary": {
+    "runs": 2,
+    "asr_rtfx_median": 111.09428333753625,
+    "asr_rtfx_min": 110.74838114105897,
+    "asr_rtfx_max": 111.44018553401354,
+    "total_rtfx_median": 95.18453284384145,
+    "total_rtfx_min": 94.95106626674071,
+    "total_rtfx_max": 95.41799942094218,
+    "asr_s_median": 5.400902942405082,
+    "align_s_median": 0.9027182110585272,
+    "asr_generate_s_median": 5.233765962999314,
+    "align_forward_s_median": 0.6069492666283622,
+    "asr_share_of_total": 0.8567923193564787,
+    "vram_peak_allocated_mb": 10293.0,
+    "vram_peak_reserved_mb": 13282.0,
+    "nvidia_used_max_mb": 23445,
+    "words": 1841,
+    "generated_tokens_total": 2323
+  },
+  "bf16_summary": {
+    "runs": 3,
+    "asr_rtfx_median": 123.68139954431071,
+    "asr_rtfx_min": 123.32655092881738,
+    "asr_rtfx_max": 123.8711152301378,
+    "total_rtfx_median": 103.38913290441668,
+    "total_rtfx_min": 103.22995336941962,
+    "total_rtfx_max": 103.49810841464762,
+    "asr_s_median": 4.851203392026946,
+    "align_s_median": 0.9460390328895301,
+    "asr_generate_s_median": 4.705467673018575,
+    "align_forward_s_median": 0.676307549001649,
+    "asr_share_of_total": 0.8368122352752636,
+    "vram_peak_allocated_mb": 10294.0,
+    "vram_peak_reserved_mb": 13284.0,
+    "nvidia_used_max_mb": 23222,
+    "words": 1839,
+    "generated_tokens_total": 2325
+  },
+  "text": {
+    "chunks": 20,
+    "exact_chunks": 18,
+    "cer": 0.0015267175572519084,
+    "edit_distance": 16,
+    "reference_chars": 10480,
+    "cer_no_whitespace": 0.0016164415194550282,
+    "fp16_chars": 10479,
+    "bf16_chars": 10480,
+    "per_chunk": [
+      {
+        "chunk": 0,
+        "exact": true,
+        "fp16_chars": 448,
+        "bf16_chars": 448,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 1,
+        "exact": true,
+        "fp16_chars": 426,
+        "bf16_chars": 426,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 2,
+        "exact": false,
+        "fp16_chars": 402,
+        "bf16_chars": 405,
+        "edit_distance": 8,
+        "cer": 0.019753086419753086
+      },
+      {
+        "chunk": 3,
+        "exact": true,
+        "fp16_chars": 543,
+        "bf16_chars": 543,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 4,
+        "exact": true,
+        "fp16_chars": 559,
+        "bf16_chars": 559,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 5,
+        "exact": true,
+        "fp16_chars": 522,
+        "bf16_chars": 522,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 6,
+        "exact": true,
+        "fp16_chars": 552,
+        "bf16_chars": 552,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 7,
+        "exact": true,
+        "fp16_chars": 507,
+        "bf16_chars": 507,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 8,
+        "exact": true,
+        "fp16_chars": 518,
+        "bf16_chars": 518,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 9,
+        "exact": true,
+        "fp16_chars": 499,
+        "bf16_chars": 499,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 10,
+        "exact": true,
+        "fp16_chars": 493,
+        "bf16_chars": 493,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 11,
+        "exact": true,
+        "fp16_chars": 616,
+        "bf16_chars": 616,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 12,
+        "exact": false,
+        "fp16_chars": 554,
+        "bf16_chars": 552,
+        "edit_distance": 8,
+        "cer": 0.014492753623188406
+      },
+      {
+        "chunk": 13,
+        "exact": true,
+        "fp16_chars": 473,
+        "bf16_chars": 473,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 14,
+        "exact": true,
+        "fp16_chars": 547,
+        "bf16_chars": 547,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 15,
+        "exact": true,
+        "fp16_chars": 545,
+        "bf16_chars": 545,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 16,
+        "exact": true,
+        "fp16_chars": 551,
+        "bf16_chars": 551,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 17,
+        "exact": true,
+        "fp16_chars": 642,
+        "bf16_chars": 642,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 18,
+        "exact": true,
+        "fp16_chars": 577,
+        "bf16_chars": 577,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 19,
+        "exact": true,
+        "fp16_chars": 505,
+        "bf16_chars": 505,
+        "edit_distance": 0,
+        "cer": 0.0
+      }
+    ]
+  },
+  "timestamps": {
+    "chunks_compared": 18,
+    "word_pairs": 1669,
+    "word_text_mismatch": 0,
+    "start_delta": {
+      "count": 1669,
+      "mean": 0.0006231276213301361,
+      "median": 0.0,
+      "p95": 0.0,
+      "max": 0.24,
+      "gt_0.08s": 6,
+      "gt_0.16s": 2,
+      "gt_0.32s": 0
+    },
+    "end_delta": {
+      "count": 1669,
+      "mean": 0.0006231276213301373,
+      "median": 0.0,
+      "p95": 0.0,
+      "max": 0.08000000000000185,
+      "gt_0.08s": 9,
+      "gt_0.16s": 0,
+      "gt_0.32s": 0
+    },
+    "word_counts": [
+      {
+        "chunk": 0,
+        "fp16": 79,
+        "bf16": 79
+      },
+      {
+        "chunk": 1,
+        "fp16": 71,
+        "bf16": 71
+      },
+      {
+        "chunk": 2,
+        "fp16": 75,
+        "bf16": 75
+      },
+      {
+        "chunk": 3,
+        "fp16": 93,
+        "bf16": 93
+      },
+      {
+        "chunk": 4,
+        "fp16": 106,
+        "bf16": 106
+      },
+      {
+        "chunk": 5,
+        "fp16": 91,
+        "bf16": 91
+      },
+      {
+        "chunk": 6,
+        "fp16": 101,
+        "bf16": 101
+      },
+      {
+        "chunk": 7,
+        "fp16": 92,
+        "bf16": 92
+      },
+      {
+        "chunk": 8,
+        "fp16": 91,
+        "bf16": 91
+      },
+      {
+        "chunk": 9,
+        "fp16": 90,
+        "bf16": 90
+      },
+      {
+        "chunk": 10,
+        "fp16": 86,
+        "bf16": 86
+      },
+      {
+        "chunk": 11,
+        "fp16": 108,
+        "bf16": 108
+      },
+      {
+        "chunk": 12,
+        "fp16": 97,
+        "bf16": 95
+      },
+      {
+        "chunk": 13,
+        "fp16": 76,
+        "bf16": 76
+      },
+      {
+        "chunk": 14,
+        "fp16": 99,
+        "bf16": 99
+      },
+      {
+        "chunk": 15,
+        "fp16": 98,
+        "bf16": 98
+      },
+      {
+        "chunk": 16,
+        "fp16": 90,
+        "bf16": 90
+      },
+      {
+        "chunk": 17,
+        "fp16": 112,
+        "bf16": 112
+      },
+      {
+        "chunk": 18,
+        "fp16": 98,
+        "bf16": 98
+      },
+      {
+        "chunk": 19,
+        "fp16": 88,
+        "bf16": 88
+      }
+    ],
+    "fp16_problems": [
+      {
+        "chunk": 2,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 3,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 4,
+        "problems": [
+          "zero_length:9"
+        ]
+      },
+      {
+        "chunk": 5,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 6,
+        "problems": [
+          "zero_length:9"
+        ]
+      },
+      {
+        "chunk": 7,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 8,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 9,
+        "problems": [
+          "zero_length:7"
+        ]
+      },
+      {
+        "chunk": 10,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 11,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 13,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 14,
+        "problems": [
+          "zero_length:5"
+        ]
+      },
+      {
+        "chunk": 15,
+        "problems": [
+          "zero_length:4"
+        ]
+      },
+      {
+        "chunk": 16,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 17,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 18,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 19,
+        "problems": [
+          "zero_length:2"
+        ]
+      }
+    ],
+    "bf16_problems": [
+      {
+        "chunk": 2,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 3,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 4,
+        "problems": [
+          "zero_length:9"
+        ]
+      },
+      {
+        "chunk": 5,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 6,
+        "problems": [
+          "zero_length:8"
+        ]
+      },
+      {
+        "chunk": 7,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 8,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 9,
+        "problems": [
+          "zero_length:7"
+        ]
+      },
+      {
+        "chunk": 10,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 11,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 12,
+        "problems": [
+          "zero_length:1"
+        ]
+      },
+      {
+        "chunk": 13,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 14,
+        "problems": [
+          "zero_length:4"
+        ]
+      },
+      {
+        "chunk": 15,
+        "problems": [
+          "zero_length:4"
+        ]
+      },
+      {
+        "chunk": 16,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 17,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 18,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 19,
+        "problems": [
+          "zero_length:2"
+        ]
+      }
+    ],
+    "fp16_clamp_errors": [],
+    "bf16_clamp_errors": []
+  },
+  "stability": {
+    "fp16_texts_identical_across_runs": true,
+    "bf16_texts_identical_across_runs": true,
+    "fp16_generated_tokens": [
+      [
+        99,
+        86,
+        93,
+        112,
+        142,
+        113,
+        122,
+        117,
+        109,
+        108,
+        107,
+        132,
+        124,
+        110,
+        122,
+        124,
+        116,
+        144,
+        133,
+        110
+      ],
+      [
+        99,
+        86,
+        93,
+        112,
+        142,
+        113,
+        122,
+        117,
+        109,
+        108,
+        107,
+        132,
+        124,
+        110,
+        122,
+        124,
+        116,
+        144,
+        133,
+        110
+      ]
+    ],
+    "bf16_generated_tokens": [
+      [
+        99,
+        86,
+        96,
+        112,
+        142,
+        113,
+        122,
+        117,
+        109,
+        108,
+        107,
+        132,
+        123,
+        110,
+        122,
+        124,
+        116,
+        144,
+        133,
+        110
+      ],
+      [
+        99,
+        86,
+        96,
+        112,
+        142,
+        113,
+        122,
+        117,
+        109,
+        108,
+        107,
+        132,
+        123,
+        110,
+        122,
+        124,
+        116,
+        144,
+        133,
+        110
+      ],
+      [
+        99,
+        86,
+        96,
+        112,
+        142,
+        113,
+        122,
+        117,
+        109,
+        108,
+        107,
+        132,
+        123,
+        110,
+        122,
+        124,
+        116,
+        144,
+        133,
+        110
+      ]
+    ]
+  }
+}

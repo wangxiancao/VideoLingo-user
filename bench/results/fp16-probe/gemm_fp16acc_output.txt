@@ -1,0 +1,12 @@
+Command:
+  cd /tmp/fp16-probe
+  /usr/local/cuda-12.8/bin/nvcc -O3 -arch=sm_86 -o gemm_fp16acc gemm_fp16acc.cu \
+    -I/usr/local/cuda-12.8/include -L/usr/local/cuda-12.8/lib64 -lcublas
+  LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64 ./gemm_fp16acc
+
+Output:
+fp16 weights / fp32 accumulate: 2.405 ms, 57.1 TFLOPS
+fp16 weights / fp16 accumulate: 1.203 ms, 114.3 TFLOPS
+error K=2048: max_abs=0.007812 mean_abs=0.000783 max_rel=2.595506 nonfinite=0
+
+GPU: NVIDIA GeForce RTX 3090, sm_86, CUDA 12.8 toolkit, driver 570.144.

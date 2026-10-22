@@ -1,0 +1,864 @@
+{
+  "audio": "/tmp/t2b-real/zh_real_30s.wav",
+  "duration_s": 30.0,
+  "load_s": 4.087,
+  "asr_times_s": [
+    1.8914,
+    1.45,
+    1.4462,
+    1.4712
+  ],
+  "asr_first_s": 1.8914,
+  "asr_steady_median_s": 1.45,
+  "asr_rtfx_steady": 20.69,
+  "align_times_s": [
+    0.0808,
+    0.0503,
+    0.0512,
+    0.0509
+  ],
+  "align_steady_median_s": 0.0509,
+  "combined_rtfx_steady": 19.99,
+  "vram_peak_alloc_mb": 6068.9,
+  "vram_peak_reserved_mb": 6342.0,
+  "text": "收，但国民党立委王鸿威爆料，上次协商时，吴乃仁只愿每月还五万元，让王鸿威忍不住讽刺，难道要还到三百七十九岁吗？我七月十六日得到的消息是，吴乃仁方面提出的还款条件是每月还五万元，分期长。",
+  "word_count": 1,
+  "first_words": [
+    [
+      {
+        "text": "收",
+        "start_time": 0.0,
+        "end_time": 0.32
+      },
+      {
+        "text": "但",
+        "start_time": 0.8,
+        "end_time": 0.96
+      },
+      {
+        "text": "国",
+        "start_time": 0.96,
+        "end_time": 1.12
+      },
+      {
+        "text": "民",
+        "start_time": 1.12,
+        "end_time": 1.36
+      },
+      {
+        "text": "党",
+        "start_time": 1.36,
+        "end_time": 1.6
+      },
+      {
+        "text": "立",
+        "start_time": 1.6,
+        "end_time": 1.68
+      },
+      {
+        "text": "委",
+        "start_time": 1.68,
+        "end_time": 1.84
+      },
+      {
+        "text": "王",
+        "start_time": 1.84,
+        "end_time": 2.08
+      },
+      {
+        "text": "鸿",
+        "start_time": 2.08,
+        "end_time": 2.24
+      },
+      {
+        "text": "威",
+        "start_time": 2.24,
+        "end_time": 2.48
+      },
+      {
+        "text": "爆",
+        "start_time": 2.48,
+        "end_time": 2.64
+      },
+      {
+        "text": "料",
+        "start_time": 2.64,
+        "end_time": 2.8
+      },
+      {
+        "text": "上",
+        "start_time": 2.8,
+        "end_time": 3.04
+      },
+      {
+        "text": "次",
+        "start_time": 3.04,
+        "end_time": 3.2
+      },
+      {
+        "text": "协",
+        "start_time": 3.2,
+        "end_time": 3.36
+      },
+      {
+        "text": "商",
+        "start_time": 3.36,
+        "end_time": 3.6
+      },
+      {
+        "text": "时",
+        "start_time": 3.6,
+        "end_time": 4.0
+      },
+      {
+        "text": "吴",
+        "start_time": 5.68,
+        "end_time": 5.76
+      },
+      {
+        "text": "乃",
+        "start_time": 5.76,
+        "end_time": 6.0
+      },
+      {
+        "text": "仁",
+        "start_time": 6.0,
+        "end_time": 6.32
+      },
+      {
+        "text": "只",
+        "start_time": 6.32,
+        "end_time": 6.48
+      },
+      {
+        "text": "愿",
+        "start_time": 6.48,
+        "end_time": 6.64
+      },
+      {
+        "text": "每",
+        "start_time": 6.64,
+        "end_time": 6.8
+      },
+      {
+        "text": "月",
+        "start_time": 6.8,
+        "end_time": 6.96
+      },
+      {
+        "text": "还",
+        "start_time": 6.96,
+        "end_time": 7.28
+      },
+      {
+        "text": "五",
+        "start_time": 7.28,
+        "end_time": 7.44
+      },
+      {
+        "text": "万",
+        "start_time": 7.44,
+        "end_time": 7.68
+      },
+      {
+        "text": "元",
+        "start_time": 7.68,
+        "end_time": 8.0
+      },
+      {
+        "text": "让",
+        "start_time": 8.16,
+        "end_time": 8.4
+      },
+      {
+        "text": "王",
+        "start_time": 8.4,
+        "end_time": 8.56
+      },
+      {
+        "text": "鸿",
+        "start_time": 8.56,
+        "end_time": 8.72
+      },
+      {
+        "text": "威",
+        "start_time": 8.72,
+        "end_time": 8.88
+      },
+      {
+        "text": "忍",
+        "start_time": 8.88,
+        "end_time": 9.12
+      },
+      {
+        "text": "不",
+        "start_time": 9.12,
+        "end_time": 9.12
+      },
+      {
+        "text": "住",
+        "start_time": 9.12,
+        "end_time": 9.28
+      },
+      {
+        "text": "讽",
+        "start_time": 9.28,
+        "end_time": 9.6
+      },
+      {
+        "text": "刺",
+        "start_time": 9.6,
+        "end_time": 9.84
+      },
+      {
+        "text": "难",
+        "start_time": 10.64,
+        "end_time": 10.88
+      },
+      {
+        "text": "道",
+        "start_time": 10.88,
+        "end_time": 11.04
+      },
+      {
+        "text": "要",
+        "start_time": 11.04,
+        "end_time": 11.28
+      },
+      {
+        "text": "还",
+        "start_time": 11.28,
+        "end_time": 11.44
+      },
+      {
+        "text": "到",
+        "start_time": 11.44,
+        "end_time": 11.68
+      },
+      {
+        "text": "三",
+        "start_time": 11.68,
+        "end_time": 11.92
+      },
+      {
+        "text": "百",
+        "start_time": 11.92,
+        "end_time": 12.0
+      },
+      {
+        "text": "七",
+        "start_time": 12.0,
+        "end_time": 12.16
+      },
+      {
+        "text": "十",
+        "start_time": 12.16,
+        "end_time": 12.32
+      },
+      {
+        "text": "九",
+        "start_time": 12.32,
+        "end_time": 12.56
+      },
+      {
+        "text": "岁",
+        "start_time": 12.56,
+        "end_time": 12.8
+      },
+      {
+        "text": "吗",
+        "start_time": 12.8,
+        "end_time": 13.04
+      },
+      {
+        "text": "我",
+        "start_time": 13.6,
+        "end_time": 13.76
+      },
+      {
+        "text": "七",
+        "start_time": 13.76,
+        "end_time": 14.0
+      },
+      {
+        "text": "月",
+        "start_time": 14.0,
+        "end_time": 14.16
+      },
+      {
+        "text": "十",
+        "start_time": 14.16,
+        "end_time": 14.32
+      },
+      {
+        "text": "六",
+        "start_time": 14.32,
+        "end_time": 14.56
+      },
+      {
+        "text": "日",
+        "start_time": 14.56,
+        "end_time": 14.72
+      },
+      {
+        "text": "得",
+        "start_time": 14.72,
+        "end_time": 14.88
+      },
+      {
+        "text": "到",
+        "start_time": 14.88,
+        "end_time": 15.04
+      },
+      {
+        "text": "的",
+        "start_time": 15.04,
+        "end_time": 15.12
+      },
+      {
+        "text": "消",
+        "start_time": 15.12,
+        "end_time": 15.28
+      },
+      {
+        "text": "息",
+        "start_time": 15.28,
+        "end_time": 15.44
+      },
+      {
+        "text": "是",
+        "start_time": 15.44,
+        "end_time": 15.76
+      },
+      {
+        "text": "吴",
+        "start_time": 18.4,
+        "end_time": 18.56
+      },
+      {
+        "text": "乃",
+        "start_time": 18.56,
+        "end_time": 18.72
+      },
+      {
+        "text": "仁",
+        "start_time": 18.72,
+        "end_time": 18.96
+      },
+      {
+        "text": "方",
+        "start_time": 18.96,
+        "end_time": 19.12
+      },
+      {
+        "text": "面",
+        "start_time": 19.12,
+        "end_time": 19.36
+      },
+      {
+        "text": "提",
+        "start_time": 19.36,
+        "end_time": 19.52
+      },
+      {
+        "text": "出",
+        "start_time": 19.52,
+        "end_time": 19.68
+      },
+      {
+        "text": "的",
+        "start_time": 19.68,
+        "end_time": 19.76
+      },
+      {
+        "text": "还",
+        "start_time": 19.76,
+        "end_time": 19.92
+      },
+      {
+        "text": "款",
+        "start_time": 19.92,
+        "end_time": 20.16
+      },
+      {
+        "text": "条",
+        "start_time": 20.16,
+        "end_time": 20.32
+      },
+      {
+        "text": "件",
+        "start_time": 20.32,
+        "end_time": 20.64
+      },
+      {
+        "text": "是",
+        "start_time": 20.72,
+        "end_time": 20.88
+      },
+      {
+        "text": "每",
+        "start_time": 20.88,
+        "end_time": 21.12
+      },
+      {
+        "text": "月",
+        "start_time": 21.12,
+        "end_time": 21.28
+      },
+      {
+        "text": "还",
+        "start_time": 21.28,
+        "end_time": 21.52
+      },
+      {
+        "text": "五",
+        "start_time": 21.52,
+        "end_time": 21.68
+      },
+      {
+        "text": "万",
+        "start_time": 21.68,
+        "end_time": 21.92
+      },
+      {
+        "text": "元",
+        "start_time": 21.92,
+        "end_time": 22.24
+      },
+      {
+        "text": "分",
+        "start_time": 29.44,
+        "end_time": 29.6
+      },
+      {
+        "text": "期",
+        "start_time": 29.6,
+        "end_time": 29.76
+      },
+      {
+        "text": "长",
+        "start_time": 29.76,
+        "end_time": 29.92
+      }
+    ]
+  ],
+  "last_words": [
+    [
+      {
+        "text": "收",
+        "start_time": 0.0,
+        "end_time": 0.32
+      },
+      {
+        "text": "但",
+        "start_time": 0.8,
+        "end_time": 0.96
+      },
+      {
+        "text": "国",
+        "start_time": 0.96,
+        "end_time": 1.12
+      },
+      {
+        "text": "民",
+        "start_time": 1.12,
+        "end_time": 1.36
+      },
+      {
+        "text": "党",
+        "start_time": 1.36,
+        "end_time": 1.6
+      },
+      {
+        "text": "立",
+        "start_time": 1.6,
+        "end_time": 1.68
+      },
+      {
+        "text": "委",
+        "start_time": 1.68,
+        "end_time": 1.84
+      },
+      {
+        "text": "王",
+        "start_time": 1.84,
+        "end_time": 2.08
+      },
+      {
+        "text": "鸿",
+        "start_time": 2.08,
+        "end_time": 2.24
+      },
+      {
+        "text": "威",
+        "start_time": 2.24,
+        "end_time": 2.48
+      },
+      {
+        "text": "爆",
+        "start_time": 2.48,
+        "end_time": 2.64
+      },
+      {
+        "text": "料",
+        "start_time": 2.64,
+        "end_time": 2.8
+      },
+      {
+        "text": "上",
+        "start_time": 2.8,
+        "end_time": 3.04
+      },
+      {
+        "text": "次",
+        "start_time": 3.04,
+        "end_time": 3.2
+      },
+      {
+        "text": "协",
+        "start_time": 3.2,
+        "end_time": 3.36
+      },
+      {
+        "text": "商",
+        "start_time": 3.36,
+        "end_time": 3.6
+      },
+      {
+        "text": "时",
+        "start_time": 3.6,
+        "end_time": 4.0
+      },
+      {
+        "text": "吴",
+        "start_time": 5.68,
+        "end_time": 5.76
+      },
+      {
+        "text": "乃",
+        "start_time": 5.76,
+        "end_time": 6.0
+      },
+      {
+        "text": "仁",
+        "start_time": 6.0,
+        "end_time": 6.32
+      },
+      {
+        "text": "只",
+        "start_time": 6.32,
+        "end_time": 6.48
+      },
+      {
+        "text": "愿",
+        "start_time": 6.48,
+        "end_time": 6.64
+      },
+      {
+        "text": "每",
+        "start_time": 6.64,
+        "end_time": 6.8
+      },
+      {
+        "text": "月",
+        "start_time": 6.8,
+        "end_time": 6.96
+      },
+      {
+        "text": "还",
+        "start_time": 6.96,
+        "end_time": 7.28
+      },
+      {
+        "text": "五",
+        "start_time": 7.28,
+        "end_time": 7.44
+      },
+      {
+        "text": "万",
+        "start_time": 7.44,
+        "end_time": 7.68
+      },
+      {
+        "text": "元",
+        "start_time": 7.68,
+        "end_time": 8.0
+      },
+      {
+        "text": "让",
+        "start_time": 8.16,
+        "end_time": 8.4
+      },
+      {
+        "text": "王",
+        "start_time": 8.4,
+        "end_time": 8.56
+      },
+      {
+        "text": "鸿",
+        "start_time": 8.56,
+        "end_time": 8.72
+      },
+      {
+        "text": "威",
+        "start_time": 8.72,
+        "end_time": 8.88
+      },
+      {
+        "text": "忍",
+        "start_time": 8.88,
+        "end_time": 9.12
+      },
+      {
+        "text": "不",
+        "start_time": 9.12,
+        "end_time": 9.12
+      },
+      {
+        "text": "住",
+        "start_time": 9.12,
+        "end_time": 9.28
+      },
+      {
+        "text": "讽",
+        "start_time": 9.28,
+        "end_time": 9.6
+      },
+      {
+        "text": "刺",
+        "start_time": 9.6,
+        "end_time": 9.84
+      },
+      {
+        "text": "难",
+        "start_time": 10.64,
+        "end_time": 10.88
+      },
+      {
+        "text": "道",
+        "start_time": 10.88,
+        "end_time": 11.04
+      },
+      {
+        "text": "要",
+        "start_time": 11.04,
+        "end_time": 11.28
+      },
+      {
+        "text": "还",
+        "start_time": 11.28,
+        "end_time": 11.44
+      },
+      {
+        "text": "到",
+        "start_time": 11.44,
+        "end_time": 11.68
+      },
+      {
+        "text": "三",
+        "start_time": 11.68,
+        "end_time": 11.92
+      },
+      {
+        "text": "百",
+        "start_time": 11.92,
+        "end_time": 12.0
+      },
+      {
+        "text": "七",
+        "start_time": 12.0,
+        "end_time": 12.16
+      },
+      {
+        "text": "十",
+        "start_time": 12.16,
+        "end_time": 12.32
+      },
+      {
+        "text": "九",
+        "start_time": 12.32,
+        "end_time": 12.56
+      },
+      {
+        "text": "岁",
+        "start_time": 12.56,
+        "end_time": 12.8
+      },
+      {
+        "text": "吗",
+        "start_time": 12.8,
+        "end_time": 13.04
+      },
+      {
+        "text": "我",
+        "start_time": 13.6,
+        "end_time": 13.76
+      },
+      {
+        "text": "七",
+        "start_time": 13.76,
+        "end_time": 14.0
+      },
+      {
+        "text": "月",
+        "start_time": 14.0,
+        "end_time": 14.16
+      },
+      {
+        "text": "十",
+        "start_time": 14.16,
+        "end_time": 14.32
+      },
+      {
+        "text": "六",
+        "start_time": 14.32,
+        "end_time": 14.56
+      },
+      {
+        "text": "日",
+        "start_time": 14.56,
+        "end_time": 14.72
+      },
+      {
+        "text": "得",
+        "start_time": 14.72,
+        "end_time": 14.88
+      },
+      {
+        "text": "到",
+        "start_time": 14.88,
+        "end_time": 15.04
+      },
+      {
+        "text": "的",
+        "start_time": 15.04,
+        "end_time": 15.12
+      },
+      {
+        "text": "消",
+        "start_time": 15.12,
+        "end_time": 15.28
+      },
+      {
+        "text": "息",
+        "start_time": 15.28,
+        "end_time": 15.44
+      },
+      {
+        "text": "是",
+        "start_time": 15.44,
+        "end_time": 15.76
+      },
+      {
+        "text": "吴",
+        "start_time": 18.4,
+        "end_time": 18.56
+      },
+      {
+        "text": "乃",
+        "start_time": 18.56,
+        "end_time": 18.72
+      },
+      {
+        "text": "仁",
+        "start_time": 18.72,
+        "end_time": 18.96
+      },
+      {
+        "text": "方",
+        "start_time": 18.96,
+        "end_time": 19.12
+      },
+      {
+        "text": "面",
+        "start_time": 19.12,
+        "end_time": 19.36
+      },
+      {
+        "text": "提",
+        "start_time": 19.36,
+        "end_time": 19.52
+      },
+      {
+        "text": "出",
+        "start_time": 19.52,
+        "end_time": 19.68
+      },
+      {
+        "text": "的",
+        "start_time": 19.68,
+        "end_time": 19.76
+      },
+      {
+        "text": "还",
+        "start_time": 19.76,
+        "end_time": 19.92
+      },
+      {
+        "text": "款",
+        "start_time": 19.92,
+        "end_time": 20.16
+      },
+      {
+        "text": "条",
+        "start_time": 20.16,
+        "end_time": 20.32
+      },
+      {
+        "text": "件",
+        "start_time": 20.32,
+        "end_time": 20.64
+      },
+      {
+        "text": "是",
+        "start_time": 20.72,
+        "end_time": 20.88
+      },
+      {
+        "text": "每",
+        "start_time": 20.88,
+        "end_time": 21.12
+      },
+      {
+        "text": "月",
+        "start_time": 21.12,
+        "end_time": 21.28
+      },
+      {
+        "text": "还",
+        "start_time": 21.28,
+        "end_time": 21.52
+      },
+      {
+        "text": "五",
+        "start_time": 21.52,
+        "end_time": 21.68
+      },
+      {
+        "text": "万",
+        "start_time": 21.68,
+        "end_time": 21.92
+      },
+      {
+        "text": "元",
+        "start_time": 21.92,
+        "end_time": 22.24
+      },
+      {
+        "text": "分",
+        "start_time": 29.44,
+        "end_time": 29.6
+      },
+      {
+        "text": "期",
+        "start_time": 29.6,
+        "end_time": 29.76
+      },
+      {
+        "text": "长",
+        "start_time": 29.76,
+        "end_time": 29.92
+      }
+    ]
+  ]
+}

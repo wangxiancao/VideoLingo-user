@@ -1,0 +1,18 @@
+Command:
+  CUBLAS_LOGINFO_DBG=1 CUBLAS_LOGDEST_DBG=stdout /root/VideoLingo/.venv/bin/python - <<'PY'
+  import torch
+  a=torch.randn(512,512,device='cuda',dtype=torch.float16)
+  b=torch.randn(512,512,device='cuda',dtype=torch.float16)
+  c=a@b
+  torch.cuda.synchronize()
+  PY
+
+Observed:
+  cuBLAS (v12.9.1) function cublasGemmEx(...) called:
+  computeType: type=cublasComputeType_t; val=CUBLAS_COMPUTE_32F(68)
+  algo: type=SOME TYPE; val=CUBLAS_GEMM_DEFAULT_TENSOR_OP(99)
+
+Conclusion: PyTorch 2.11.0+cu129 uses FP32 accumulation for FP16 matmul.
+torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction=True does not
+change the compute type; setting it to False did not change 4096^3 timing
+(2.403 ms vs 2.399 ms).

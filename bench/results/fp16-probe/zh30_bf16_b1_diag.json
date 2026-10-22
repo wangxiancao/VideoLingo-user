@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "mode": "diag",
+  "audio": {
+    "path": "/tmp/fp16-probe/zh_30s.wav",
+    "duration_s": 30.0,
+    "sample_rate": 16000,
+    "chunks": 1,
+    "chunk_seconds": 30.0,
+    "chunk_lengths_s": [
+      30.0
+    ]
+  },
+  "config": {
+    "glm_dtype": "bf16",
+    "aligner_dtype": "bf16",
+    "glm_model_dtype": "torch.bfloat16",
+    "aligner_model_dtype": "torch.bfloat16",
+    "batch_size": 1,
+    "chunk_seconds": 30.0,
+    "max_new_tokens": 512,
+    "language": "Chinese",
+    "warmups": 1,
+    "runs": 3
+  },
+  "models": {
+    "paths": {
+      "ZhipuAI/GLM-ASR-Nano-2512": "/root/.cache/modelscope/ZhipuAI/GLM-ASR-Nano-2512",
+      "Qwen/Qwen3-ForcedAligner-0.6B-hf": "/root/.cache/modelscope/Qwen/Qwen3-ForcedAligner-0___6B-hf"
+    },
+    "glm_params": 2136470528,
+    "aligner_params": 917728896
+  },
+  "environment": {
+    "torch": "2.11.0+cu129",
+    "transformers": "5.14.1",
+    "cuda": "12.9",
+    "gpu_name": "NVIDIA GeForce RTX 3090",
+    "fp16_reduced_precision_reduction": true,
+    "cublas_workaround_env": {
+      "CUBLAS_WORKSPACE_CONFIG": null,
+      "CUBLAS_LOGINFO_DBG": null
+    },
+    "before_load": {
+      "free_mb": 14283.6,
+      "total_mb": 24132.2,
+      "torch_allocated_mb": 0.0,
+      "torch_reserved_mb": 0.0
+    },
+    "after_load": {
+      "free_mb": 8394.9,
+      "total_mb": 24132.2,
+      "torch_allocated_mb": 5826.6,
+      "torch_reserved_mb": 5846.0
+    }
+  },
+  "load_s": 4.1171294988598675,
+  "load_peak": {
+    "vram_peak_allocated_mb": 5826.6,
+    "vram_peak_reserved_mb": 5846.0
+  },
+  "diagnostic": {
+    "full_forward_s": 0.4655808708630502,
+    "prefill_logits_finite": true,
+    "prefill_logits_min": -22.375,
+    "prefill_logits_max": 35.25,
+    "prefill_logits_dtype": "torch.bfloat16",
+    "generate_scores_s": 1.5260615148581564,
+    "batch_size": 1,
+    "decode_steps": 62,
+    "decode_nonfinite_steps": 0,
+    "decode_score_min": -27.5,
+    "decode_score_max": 32.25,
+    "generated_tokens": [
+      62
+    ],
+    "texts": [
+      "收，但国民党立委王鸿威爆料，上次协商时，吴乃仁只愿每月还五万元，让王鸿威忍不住讽刺，难道要还到三百七十九岁吗？我七月十六日得到的消息是，吴乃仁方面提出的还款条件是每月还五万元，分期长。"
+    ],
+    "max_new_tokens_reached": false,
+    "encoder_s": 0.05326246400363743,
+    "encoder_features": 375,
+    "decoder_prefill_s_est": 0.4123184068594128,
+    "decoder_decode_s_est": 1.0604806439951062,
+    "aligner_logits": {
+      "processor_s": 0.058418733067810535,
+      "to_device_s": 0.00081853405572474,
+      "forward_s": 0.08184322784654796,
+      "decode_s": 0.0028988230042159557,
+      "logits_shape": [
+        1,
+        641,
+        5000
+      ],
+      "logits_finite": true,
+      "logits_min": -17.625,
+      "logits_max": 17.75
+    },
+    "aligner_words_total": 83
+  }
+}
