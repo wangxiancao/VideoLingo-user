@@ -1,0 +1,354 @@
+{
+  "schema_version": 3,
+  "tool": "v4_1_spike",
+  "model": "HY-MT2-1.8B BF16 transformers FastAPI",
+  "decoding": "greedy, repetition_penalty=1.0",
+  "cold_load": {
+    "server_reported_load_s": 2.1,
+    "torch_max_mem_gb": 4.03,
+    "smi_before": {
+      "used_mib": 1574,
+      "free_mib": 22559
+    },
+    "smi_after": {
+      "used_mib": 5934,
+      "free_mib": 18199
+    }
+  },
+  "segment_contract": {
+    "orig": {
+      "ok": false,
+      "n_sentences": 8,
+      "covers_all_words_in_order": false,
+      "raw_excerpt": "{\"sentences\":[{\"start\":0,\"end\":3},{\"start\":7,\"end\":11},{\"start\":15,\"end\":19},{\"start\":23,\"end\":27},{\"start\":31,\"end\":35},{\"start\":39,\"end\":43},{\"start\":47,\"end\":51},{\"start\":55,\"end\":59}]}"
+    },
+    "v2": {
+      "ok": false,
+      "n_sentences": 15,
+      "covers_all_words_in_order": false,
+      "raw_excerpt": "{\"sentences\":[{\"start\":0,\"end\":3},{\"start\":3,\"end\":7},{\"start\":7,\"end\":11},{\"start\":11,\"end\":15},{\"start\":15,\"end\":19},{\"start\":19,\"end\":23},{\"start\":23,\"end\":27},{\"start\":27,\"end\":31},{\"start\":31,\"end\":35},{\"start\":35,\"end\":39},{\"start\":39,\"end\":43},{\"start\":43,\"end\":47},{\"start\":47,\"end\":51},{\"sta"
+    }
+  },
+  "faithful_contract": {
+    "zh_en_orig": {
+      "ok": false,
+      "ids_complete": false,
+      "all_targets_nonempty": false,
+      "extra_keys": [
+        "extra"
+      ],
+      "timing": {
+        "decode_s": 10.049,
+        "tok_per_s": 32.4
+      }
+    },
+    "zh_en_v2": {
+      "ok": true,
+      "ids_complete": true,
+      "all_targets_nonempty": true,
+      "extra_keys": [],
+      "timing": {
+        "decode_s": 9.994,
+        "tok_per_s": 32.5
+      }
+    },
+    "en_zh_orig": {
+      "ok": true,
+      "ids_complete": true,
+      "all_targets_nonempty": true,
+      "extra_keys": [],
+      "timing": {
+        "decode_s": 6.462,
+        "tok_per_s": 32.8
+      }
+    },
+    "en_zh_v2": {
+      "ok": true,
+      "ids_complete": true,
+      "all_targets_nonempty": true,
+      "extra_keys": [],
+      "timing": {
+        "decode_s": 6.486,
+        "tok_per_s": 32.8
+      }
+    }
+  },
+  "throughput_12seg_v2": {
+    "runs": [
+      {
+        "decode_s": 9.904,
+        "tok_per_s": 32.8
+      },
+      {
+        "decode_s": 7.907,
+        "tok_per_s": 32.8
+      },
+      {
+        "decode_s": 9.567,
+        "tok_per_s": 32.8
+      },
+      {
+        "decode_s": 8.882,
+        "tok_per_s": 32.8
+      },
+      {
+        "decode_s": 9.872,
+        "tok_per_s": 32.6
+      },
+      {
+        "decode_s": 10.123,
+        "tok_per_s": 32.7
+      }
+    ],
+    "tok_per_s_median": 32.8,
+    "decode_s_median": 9.7195
+  },
+  "quality_for_human_review": {
+    "zh_en": {
+      "samples": [
+        {
+          "source": "请不吝点赞订阅转发打赏支持明镜与点点栏目这个是我上周统计的香毒素水溶液和香毒素甲醇溶液分别统计了他们这个溶剂",
+          "faithful": "Please generously like, subscribe, share, and reward to support the Mingjing and DianDian section. This is the statistics I gathered last week for the fragrance toxin aqueous solution and the fragrance toxin methanol solution, respectively, regarding the solvent they used.",
+          "refined": "Please generously like, subscribe, share, and reward to support the Mingjing and DianDian section. This is the statistics I gathered last week for the fragrance toxin aqueous solution and the fragrance toxin methanol solution, respectively, regarding the solvent they used.",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "就是有溶剂重排发生这个外层的溶剂入侵所发生的这个时间的情况然后横坐标就是第一次次有有外层的溶剂进入呃取代了取",
+          "faithful": "That is, solvent rearrangement occurs, and the outer solvent invades, leading to this time situation. The horizontal axis represents the first time the outer solvent enters and replaces the original solvent.",
+          "refined": "That is, solvent rearrangement occurs, and the outer solvent invades, leading to this time situation. The horizontal axis represents the first time the outer solvent enters and replaces the original solvent.",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "代了最近的那个溶剂之后的呃的时间然后横坐标是它的那个助长度发生的就是轨迹数发生的次数然后这里的平均对于水溶液",
+          "faithful": "After the recent solvent replacement, the time is shown, and the horizontal axis represents the number of trajectories that occur. The average for the aqueous solution is...",
+          "refined": "After the recent solvent replacement, the time is shown, and the horizontal axis represents the number of trajectories that occur. The average for the aqueous solution is...",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "来说的话就是发生这个外层的水进入内层的平均时间是1.96匹秒然后对于甲醇溶液来说的话发生的这个时间是3.25",
+          "faithful": "In terms of the outer water entering the inner layer, the average time is 1.96 milliseconds. For the methanol solution, the time is 3.25 milliseconds.",
+          "refined": "In terms of the outer water entering the inner layer, the average time is 1.96 milliseconds. For the methanol solution, the time is 3.25 milliseconds.",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "匹秒那么对于这个甲醇水溶液水溶液和甲醇液来说的话那我们的模拟时间应该就是它模拟的时间长度应该是不同的那么水的",
+          "faithful": "For the methanol aqueous solution and methanol liquid, our simulated time should be different. The water...",
+          "refined": "For the methanol aqueous solution and methanol liquid, our simulated time should be different. The water...",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "话就是放在两匹秒甲醇的话应该放在应该延长到四匹秒这样的话整体来说比较的合适四匹秒这个是怎么看的你这个你是不是",
+          "faithful": "So, for two milliseconds of methanol, it should be extended to four milliseconds. Overall, four milliseconds seems more appropriate. What do you think about this?",
+          "refined": "So, for two milliseconds of methanol, it should be extended to four milliseconds. Overall, four milliseconds seems more appropriate. What do you think about this?",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "应该以我想想以比较小的比较少的交换时间为参照还是你选平均值了比较少的也可以按你现在的标准选大概有多少轨迹会出",
+          "faithful": "Should I use a relatively small and fewer exchange time as a reference, or choose the average? It can also be based on your current standard to estimate approximately how many trajectories will occur.",
+          "refined": "Should I use a relatively small and fewer exchange time as a reference, or choose the average? It can also be based on your current standard to estimate approximately how many trajectories will occur.",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "现交换请不吝点赞订阅不到百分之四十吧请不吝点赞订阅打赏支持明镜与点点栏目不到百分之四十吧百分之四十你",
+          "faithful": "Please generously like, subscribe, and reward. Less than 40% should be enough. Please generously like, subscribe, and reward to support the Mingjing and DianDian section. Less than 40%.",
+          "refined": "Please generously like, subscribe, and reward. Less than 40% should be enough. Please generously like, subscribe, and reward to support the Mingjing and DianDian section. Less than 40%.",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "如果是按百分之十能接到的是是多长时间呢什么百分之就发生交换交换发生比例小于百分之请不吝点赞订阅那我需要统计",
+          "faithful": "If we use 10%, how long would it take? The exchange ratio is less than 10%. Please generously like, subscribe. I need to count...",
+          "refined": "If we use 10%, how long would it take? The exchange ratio is less than 10%. Please generously like, subscribe. I need to count...",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "一下你大概估计一下你看这个图看这个图的话应该是50条轨迹总共应该是200条轨迹共是200条轨迹14分之1",
+          "faithful": "Just give a rough estimate. Looking at this graph, there should be about 50 trajectories in total, which is 1/14 of 200 trajectories.",
+          "refined": "Just give a rough estimate. Looking at this graph, there should be about 50 trajectories in total, which is 1/14 of 200 trajectories.",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "你现在选的是两匹苗四匹苗什么你现在模拟模拟是要选多长水的话是两匹苗两",
+          "faithful": "The time you selected is two milliseconds and four milliseconds. What length should you simulate for the water? Two milliseconds and two...",
+          "refined": "The time you selected is two milliseconds and four milliseconds. What length should you simulate for the water? Two milliseconds and two...",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "匹苗都是两匹苗现在都是两匹苗对嗯诶,可以,那先用两批秒DMSO呢?",
+          "faithful": "Both are two milliseconds. Okay, let's use two milliseconds for DMSO first.",
+          "refined": "Both are two milliseconds. Okay, let's use two milliseconds for DMSO first.",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        }
+      ]
+    },
+    "en_zh": {
+      "samples": [
+        {
+          "source": "We need to talk about what happened yesterday.",
+          "faithful": "我们需要谈谈昨天发生的事情。",
+          "refined": "我们需要讨论昨天发生的事情。",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": true
+          }
+        },
+        {
+          "source": "The engine overheats when you push it past eighty.",
+          "faithful": "当你把引擎推过八十时，它会过热。",
+          "refined": "当你把引擎推过八十时，它会过热。",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "She said she'd call back before the meeting starts.",
+          "faithful": "她说会在会议开始前回电。",
+          "refined": "她说会在会议开始前回电。",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "This is the last train to Stockholm tonight.",
+          "faithful": "这是今晚前往斯德哥尔摩的最后一班火车。",
+          "refined": "这是今晚前往斯德哥尔摩的最后一班火车。",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "I've been working on this for three months straight.",
+          "faithful": "我连续三个月一直在做这件事。",
+          "refined": "我连续三个月一直在做这件事。",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "Turn left at the second traffic light, then go straight.",
+          "faithful": "在第二个交通灯处左转，然后直行。",
+          "refined": "在第二个交通灯处左转，然后直行。",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "The report says global shipments dropped by twelve percent.",
+          "faithful": "报告说全球运输量下降了十二百分比。",
+          "refined": "报告说全球运输量下降了十二百分比。",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "Are you sure you locked the door before we left?",
+          "faithful": "你确定我们在离开前锁了门吗？",
+          "refined": "你确定我们在离开前锁了门吗？",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "My grandmother used to make dumplings every Sunday.",
+          "faithful": "我的祖母过去每个星期天都会做饺子。",
+          "refined": "我的祖母过去每个星期天都会做饺子。",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "In this episode we'll visit the old harbor district.",
+          "faithful": "在这一集中，我们将参观旧港口区。",
+          "refined": "在这一集中，我们将参观旧港口区。",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "The doctor recommended surgery within two weeks.",
+          "faithful": "医生建议在两周内进行手术。",
+          "refined": "医生建议在两周内进行手术。",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        },
+        {
+          "source": "Nobody expected the storm to arrive so early.",
+          "faithful": "没人预料到风暴会这么早到来。",
+          "refined": "没人预料到风暴会这么早到来。",
+          "sanity": {
+            "nonempty": true,
+            "changed_by_refine": false
+          }
+        }
+      ]
+    }
+  },
+  "refine_orig_contract": {
+    "ok": false,
+    "error": "'translations'"
+  },
+  "thinking_scan": {
+    "markers": [
+      "<think",
+      "</think",
+      "reasoning_content",
+      "As an AI",
+      "I cannot",
+      "Let me think",
+      "让我想一想",
+      "好的，我来翻译"
+    ],
+    "hits": []
+  },
+  "failures": [],
+  "smi_final": {
+    "used_mib": 6014,
+    "free_mib": 18119
+  }
+}
