@@ -131,3 +131,86 @@ def test_invalid_arguments_rejected():
         assert result.returncode == 2, (args, result.returncode, result.stderr)
         assert result.stdout == ""
         assert result.stderr.strip() != ""
+
+
+# ---------------------------------------------------------------------------
+# M0 Task 2: mel frontend vs transformers WhisperFeatureExtractor
+# ---------------------------------------------------------------------------
+
+
+def deterministic_pcm(sample_count, seed=42):
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    t = np.arange(sample_count, dtype=np.float64)
+    signal = (
+        0.3 * np.sin(2 * np.pi * 440 * t / 16000)
+        + 0.2 * np.sin(2 * np.pi * 1234 * t / 16000)
+        + 0.1 * np.sin(2 * np.pi * 3000 * t / 16000)
+        + 0.05 * rng.standard_normal(sample_count)
+    )
+    return signal.astype(np.float32)
+
+
+def reference_mel(pcm32):
+    from transformers import WhisperFeatureExtractor
+
+    extractor = WhisperFeatureExtractor(
+        feature_size=128,
+        sampling_rate=16000,
+        hop_length=160,
+        n_fft=400,
+        chunk_length=30,
+        dither=0.0,
+    )
+    return extractor(
+        pcm32, sampling_rate=16000, truncation=False, padding="max_length",
+        return_tensors="np",
+    ).input_features[0]
+
+
+def assert_mel_matches_reference(pcm32, tmp_path, max_abs=1e-3):
+    import numpy as np
+
+    pcm_path = tmp_path / "pcm.f32"
+    out_path = tmp_path / "mel.f32"
+    pcm32.tofile(pcm_path)
+    result = run_loader("mel", "--pcm", str(pcm_path), "--out", str(out_path))
+    assert result.returncode == 0, result.stderr
+    summary = json.loads(result.stdout)
+    assert summary["measurement_kind"] == "correctness_only"
+    assert summary["mel_bins"] == 128 and summary["frames"] == 3000
+    assert summary["nonfinite"] == 0
+    produced = np.fromfile(out_path, dtype=np.float32).reshape(128, 3000)
+    reference = reference_mel(pcm32)
+    diff = np.abs(produced.astype(np.float64) - reference.astype(np.float64))
+    assert diff.max() <= max_abs, diff.max()
+    assert diff.mean() <= 1e-5, diff.mean()
+
+
+def test_mel_full_chunk_matches_transformers_reference(tmp_path):
+    assert_mel_matches_reference(deterministic_pcm(480000, seed=42), tmp_path)
+
+
+def test_mel_short_pcm_zero_padding_matches_reference(tmp_path):
+    assert_mel_matches_reference(deterministic_pcm(30000, seed=7), tmp_path)
+
+
+def test_mel_rejects_invalid_inputs(tmp_path):
+    pcm_path = tmp_path / "pcm.f32"
+    deterministic_pcm(1000, seed=1).tofile(pcm_path)
+    cases = [
+        ["mel"],  # missing --pcm/--out
+        ["mel", "--pcm", str(tmp_path / "missing.f32"), "--out", str(tmp_path / "o.f32")],
+        ["mel", "--pcm", str(pcm_path), "--out", str(tmp_path / "o.f32"), "--samples", "0"],
+        ["mel", "--pcm", str(pcm_path), "--out", str(tmp_path / "o.f32"), "--wat"],
+    ]
+    for args in cases:
+        result = run_loader(*args)
+        assert result.returncode == 2, (args, result.returncode, result.stderr)
+    import numpy as np
+
+    oversize = tmp_path / "oversize.f32"
+    np.zeros(480001, dtype=np.float32).tofile(oversize)
+    result = run_loader("mel", "--pcm", str(oversize), "--out", str(tmp_path / "o.f32"))
+    assert result.returncode == 2

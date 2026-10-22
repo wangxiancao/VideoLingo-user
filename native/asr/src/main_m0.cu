@@ -6,15 +6,18 @@
 // JSON goes to stdout, diagnostics to stderr. Exit status: 0 success,
 // 1 execution/numeric failure, 2 invalid arguments or model layout.
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#include "mel_frontend.h"
 #include "model_loader.h"
 
 namespace {
@@ -95,18 +98,103 @@ void print_report(const LoadReport& report, bool with_tensors) {
 void usage(std::ostream& out) {
   out << "usage: glm_asr_m0 --model-dir DIR [--dump-plan [--hash]] [--load]\n"
       << "                  [--max-vram-mib N]\n"
+      << "       glm_asr_m0 mel --pcm FILE [--samples N] --out FILE\n"
       << "  --dump-plan : parse config + header only (no CUDA); --hash converts\n"
       << "                and hashes every tensor on the CPU\n"
       << "  --load      : convert on device, keep FP16 weights resident and hash\n"
       << "                the downloaded bytes (default action)\n"
       << "  --max-vram-mib N : device budget for weights + staging (default 16384,\n"
-      << "                the 16 GiB product constraint)\n";
+      << "                the 16 GiB product constraint)\n"
+      << "  mel         : Whisper-semantics log-mel frontend correctness mode; PCM\n"
+      << "                is raw little-endian f32 mono at 16 kHz, zero-padded to\n"
+      << "                480000 samples, output is raw f32 [128, 3000]\n";
+}
+
+int run_mel(int argc, char** argv) {
+  std::string pcm_path, out_path;
+  uint64_t samples = 0;
+  bool samples_given = false;
+  for (int i = 2; i < argc; ++i) {
+    const std::string arg = argv[i];
+    const auto next_value = [&]() -> std::string {
+      if (i + 1 >= argc) throw InvalidInput("missing value for " + arg);
+      return argv[++i];
+    };
+    if (arg == "--pcm") {
+      pcm_path = next_value();
+    } else if (arg == "--out") {
+      out_path = next_value();
+    } else if (arg == "--samples") {
+      const std::string value = next_value();
+      char* end = nullptr;
+      const unsigned long long parsed = std::strtoull(value.c_str(), &end, 10);
+      if (value.empty() || !end || *end != '\0' || parsed == 0 || parsed > kChunkSamples)
+        throw InvalidInput("--samples is out of range: " + value);
+      samples = parsed;
+      samples_given = true;
+    } else {
+      throw InvalidInput("unknown mel argument: " + arg);
+    }
+  }
+  if (pcm_path.empty() || out_path.empty())
+    throw InvalidInput("mel mode requires --pcm and --out");
+
+  std::vector<float> pcm(kChunkSamples, 0.0f);
+  {
+    std::ifstream in(pcm_path, std::ios::binary);
+    if (!in) throw InvalidInput("cannot open PCM file: " + pcm_path);
+    in.seekg(0, std::ios::end);
+    const uint64_t bytes = static_cast<uint64_t>(in.tellg());
+    if (bytes % sizeof(float) != 0) throw InvalidInput("PCM file size is not a multiple of 4");
+    const uint64_t file_samples = bytes / sizeof(float);
+    if (file_samples > static_cast<uint64_t>(kChunkSamples))
+      throw InvalidInput("PCM file exceeds the 30 s chunk (480000 samples)");
+    if (samples_given && samples > file_samples)
+      throw InvalidInput("--samples exceeds the PCM file contents");
+    const uint64_t used = samples_given ? samples : file_samples;
+    in.seekg(0, std::ios::beg);
+    if (used > 0)
+      in.read(reinterpret_cast<char*>(pcm.data()), static_cast<std::streamsize>(used * sizeof(float)));
+    if (!in) throw ExecutionError("short read from PCM file");
+  }
+
+  const MelOutput mel = compute_mel(pcm);
+  {
+    std::ofstream out(out_path, std::ios::binary);
+    if (!out) throw InvalidInput("cannot open output file: " + out_path);
+    out.write(reinterpret_cast<const char*>(mel.features.data()),
+              static_cast<std::streamsize>(mel.features.size() * sizeof(float)));
+    if (!out) throw ExecutionError("short write to output file");
+  }
+
+  // Correctness summary only; no timing or performance claims.
+  float minimum = mel.features.empty() ? 0.0f : mel.features[0];
+  float maximum = mel.features.empty() ? 0.0f : mel.features[0];
+  uint64_t non_finite = 0;
+  for (float value : mel.features) {
+    if (!std::isfinite(value)) ++non_finite;
+    minimum = std::min(minimum, value);
+    maximum = std::max(maximum, value);
+  }
+  std::cout << "{\n"
+            << "  \"schema_version\": 1,\n"
+            << "  \"tool\": \"native_asr_m0_mel\",\n"
+            << "  \"measurement_kind\": \"correctness_only\",\n"
+            << "  \"mel_bins\": " << kMelBins << ",\n"
+            << "  \"frames\": " << kOutputFrames << ",\n"
+            << "  \"nonfinite\": " << non_finite << ",\n"
+            << "  \"min\": " << minimum << ",\n"
+            << "  \"max\": " << maximum << "\n"
+            << "}\n";
+  return 0;
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
   try {
+    if (argc >= 2 && std::string(argv[1]) == "mel") return run_mel(argc, argv);
+
     std::string model_dir;
     bool dump_plan = false;
     bool hash = false;

@@ -46,9 +46,11 @@ HF `tokenizers`（Rust 绑定，非 `transformers`）；Python 3.10 仅用于加
 
 ## Task 2: mel 前端
 
-- [ ] 16 kHz mono PCM（f32）→ 128 mel × 1500 帧，与 librosa/torch 参考实现比对：
-      逐元素相对误差 ≤ 1e-3（确定性输入），记录最大偏差。
-- [ ] 30 s 定长分块、0 overlap；不足 30 s 补零并记录填充长度。
+- [x] 16 kHz mono PCM（f32）→ 128 mel × 3000 帧（1500 为 conv2 之后的位置数），
+      与 transformers WhisperFeatureExtractor（float64 流水线）比对：确定性输入
+      30 s 全块 max abs diff **9.1e-05**、短块补零路径 9.5e-06（门槛 1e-3）；
+      宿主 double 预计算窗×三角表与 slaney 滤波器组，GPU 只做 FMA。
+- [x] 30 s 定长分块、0 overlap；不足 30 s 补零（`--samples` 显式声明）并记录。
 
 ## Task 3: encoder + projector（单块）
 
