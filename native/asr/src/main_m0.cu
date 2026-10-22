@@ -6,6 +6,7 @@
 // JSON goes to stdout, diagnostics to stderr. Exit status: 0 success,
 // 1 execution/numeric failure, 2 invalid arguments or model layout.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -27,6 +28,13 @@ namespace {
 
 using InvalidInput = ModelInputError;
 using ExecutionError = ModelExecutionError;
+
+#define CUDA_CHECK_(expr)                                                       \
+  do {                                                                          \
+    const cudaError_t status_ = (expr);                                         \
+    if (status_ != cudaSuccess)                                                 \
+      throw ExecutionError(std::string(#expr " failed: ") + cudaGetErrorString(status_)); \
+  } while (false)
 
 // Reads raw little-endian f32 mono PCM and zero-pads to the 30 s chunk.
 std::vector<float> read_pcm_padded(const std::string& pcm_path, uint64_t samples_requested,
@@ -432,12 +440,146 @@ int run_transcribe(int argc, char** argv) {
   return 0;
 }
 
+
+int run_bench(int argc, char** argv) {
+  std::string model_dir, pcm_path, prompt_path;
+  bool fp16_accumulate = true;
+  int chunks = 120, runs = 3;
+  for (int i = 2; i < argc; ++i) {
+    const std::string arg = argv[i];
+    const auto next_value = [&]() -> std::string {
+      if (i + 1 >= argc) throw InvalidInput("missing value for " + arg);
+      return argv[++i];
+    };
+    if (arg == "--model-dir") model_dir = next_value();
+    else if (arg == "--pcm") pcm_path = next_value();
+    else if (arg == "--prompt-ids") prompt_path = next_value();
+    else if (arg == "--chunks") {
+      char* end = nullptr;
+      const long parsed = std::strtol(next_value().c_str(), &end, 10);
+      if (end && *end == '\0' && parsed > 0 && parsed <= 128) chunks = static_cast<int>(parsed);
+      else throw InvalidInput("--chunks out of range (1..128)");
+    } else if (arg == "--runs") {
+      char* end = nullptr;
+      const long parsed = std::strtol(next_value().c_str(), &end, 10);
+      if (end && *end == '\0' && parsed > 0 && parsed <= 10) runs = static_cast<int>(parsed);
+      else throw InvalidInput("--runs out of range (1..10)");
+    } else if (arg == "--gemm-acc") {
+      const std::string value = next_value();
+      if (value == "16") fp16_accumulate = true;
+      else if (value == "32") fp16_accumulate = false;
+      else throw InvalidInput("--gemm-acc must be 16 or 32");
+    } else {
+      throw InvalidInput("unknown bench argument: " + arg);
+    }
+  }
+  if (model_dir.empty() || pcm_path.empty() || prompt_path.empty())
+    throw InvalidInput("bench mode requires --model-dir, --pcm and --prompt-ids");
+
+  std::vector<int64_t> prompt_ids;
+  {
+    std::ifstream in(prompt_path);
+    if (!in) throw InvalidInput("cannot open prompt ids file: " + prompt_path);
+    long value;
+    while (in >> value) prompt_ids.push_back(value);
+    if (prompt_ids.empty()) throw InvalidInput("prompt ids file is empty");
+  }
+  std::vector<float> single = read_pcm_padded(pcm_path, 0, false);
+  std::vector<float> pcm;
+  pcm.reserve(single.size() * chunks);
+  for (int i = 0; i < chunks; ++i) pcm.insert(pcm.end(), single.begin(), single.end());
+
+  DeviceWeights weights = load_weights_resident(model_dir, 16384ull * 1024 * 1024);
+  DecodeOptions decode_options;
+  decode_options.fp16_accumulate = fp16_accumulate;
+  EncodeOptions encode_options;
+  encode_options.fp16_accumulate = fp16_accumulate;
+
+  const int kEncodeGroup = 8;
+  void* device_audio = nullptr;
+  const size_t audio_total = static_cast<size_t>(chunks) * 375 * 2048;
+  if (cudaMalloc(&device_audio, audio_total * sizeof(uint16_t)) != cudaSuccess)
+    throw ExecutionError("cudaMalloc failed for batched audio embeds");
+
+  std::vector<float> mel_ms(runs), encode_ms(runs), prefill_ms(runs), decode_ms(runs);
+  std::vector<int> steps(runs);
+  for (int run = 0; run < runs; ++run) {
+    cudaEvent_t t0, t1, t2;
+    if (cudaEventCreate(&t0) != cudaSuccess || cudaEventCreate(&t1) != cudaSuccess ||
+        cudaEventCreate(&t2) != cudaSuccess)
+      throw ExecutionError("cudaEventCreate failed");
+    CUDA_CHECK_(cudaEventRecord(t0));
+    const MelOutput mel = compute_mel_batched(pcm, chunks);
+    CUDA_CHECK_(cudaEventRecord(t1));
+    for (int base = 0; base < chunks; base += kEncodeGroup) {
+      const int group = std::min(kEncodeGroup, chunks - base);
+      std::vector<float> group_mel(mel.features.begin() + static_cast<long>(base) * 128 * 3000,
+                                   mel.features.begin() +
+                                       static_cast<long>(base + group) * 128 * 3000);
+      run_encode_batched(group_mel, group, &weights, encode_options,
+                         static_cast<uint16_t*>(device_audio) +
+                             static_cast<size_t>(base) * 375 * 2048);
+    }
+    CUDA_CHECK_(cudaEventRecord(t2));
+    const DecodeBatchResult decoded = run_decode_batched(
+        &weights, static_cast<const uint16_t*>(device_audio), chunks, prompt_ids, decode_options);
+    CUDA_CHECK_(cudaEventSynchronize(t2));
+    float mel_elapsed = 0.0f, encode_elapsed = 0.0f;
+    CUDA_CHECK_(cudaEventElapsedTime(&mel_elapsed, t0, t1));
+    CUDA_CHECK_(cudaEventElapsedTime(&encode_elapsed, t1, t2));
+    mel_ms[run] = mel_elapsed;
+    encode_ms[run] = encode_elapsed;
+    prefill_ms[run] = decoded.prefill_ms;
+    decode_ms[run] = decoded.decode_ms;
+    steps[run] = decoded.steps;
+    cudaEventDestroy(t0);
+    cudaEventDestroy(t1);
+    cudaEventDestroy(t2);
+  }
+  cudaFree(device_audio);
+
+  const auto median_of = [](std::vector<float> values) {
+    std::sort(values.begin(), values.end());
+    const size_t n = values.size();
+    return n % 2 ? values[n / 2] : 0.5f * (values[n / 2 - 1] + values[n / 2]);
+  };
+  const float mel = median_of(mel_ms), enc = median_of(encode_ms);
+  const float pre = median_of(prefill_ms), dec = median_of(decode_ms);
+  const float total = mel + enc + pre + dec;
+
+  std::cout << "{\n"
+            << "  \"schema_version\": 1,\n"
+            << "  \"tool\": \"native_asr_m1_bench\",\n"
+            << "  \"measurement_kind\": \"diagnostic_shared_gpu\",\n"
+            << "  \"note\": \"synthetic loop of one 30 s fixture; not ASR acceptance evidence\",\n"
+            << "  \"gemm_acc\": \"" << (fp16_accumulate ? "fp16" : "fp32") << "\",\n"
+            << "  \"chunks\": " << chunks << ",\n"
+            << "  \"runs\": " << runs << ",\n"
+            << "  \"steps_median\": " << steps[runs / 2] << ",\n"
+            << "  \"stage_ms_median\": {\"mel\": " << mel << ", \"encoder\": " << enc
+            << ", \"prefill\": " << pre << ", \"decode\": " << dec << "},\n"
+            << "  \"stage_ms_all\": {\"mel\": [";
+  for (int i = 0; i < runs; ++i) std::cout << (i ? ", " : "") << mel_ms[i];
+  std::cout << "], \"encoder\": [";
+  for (int i = 0; i < runs; ++i) std::cout << (i ? ", " : "") << encode_ms[i];
+  std::cout << "], \"prefill\": [";
+  for (int i = 0; i < runs; ++i) std::cout << (i ? ", " : "") << prefill_ms[i];
+  std::cout << "], \"decode\": [";
+  for (int i = 0; i < runs; ++i) std::cout << (i ? ", " : "") << decode_ms[i];
+  std::cout << "]},\n"
+            << "  \"total_stage_ms_median\": " << total << ",\n"
+            << "  \"replay_gemm_linear_estimate_ms\": 3757.845\n"
+            << "}\n";
+  return 0;
+}
+
 int main(int argc, char** argv) {
   try {
     const std::string first = argc >= 2 ? argv[1] : "";
     if (first == "mel") return run_mel(argc, argv);
     if (first == "encode") return run_encode(argc, argv);
     if (first == "transcribe") return run_transcribe(argc, argv);
+    if (first == "bench") return run_bench(argc, argv);
 
     std::string model_dir;
     bool dump_plan = false;

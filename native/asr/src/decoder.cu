@@ -943,6 +943,12 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
   DecodeBatchResult result;
   result.per_chunk_ids.resize(chunks);
   std::vector<int64_t> current(chunks, 0);
+  cudaEvent_t prefill_start, prefill_stop, decode_start, decode_stop;
+  CUDA_CHECK(cudaEventCreate(&prefill_start));
+  CUDA_CHECK(cudaEventCreate(&prefill_stop));
+  CUDA_CHECK(cudaEventCreate(&decode_start));
+  CUDA_CHECK(cudaEventCreate(&decode_stop));
+  CUDA_CHECK(cudaEventRecord(prefill_start));
   for (int base = 0; base < chunks; base += kGroup) {
     const int group = std::min(kGroup, chunks - base);
     const int rows = group * L;
@@ -1063,6 +1069,8 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
     }
   }
 
+  CUDA_CHECK(cudaEventRecord(prefill_stop));
+  CUDA_CHECK(cudaEventRecord(decode_start));
   // ---- lockstep decode over the whole batch ----
   const std::vector<int64_t> eos_ids = {59246, 59253, 59255};
   std::vector<char> finished(chunks, 0);
@@ -1151,6 +1159,15 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
       }
     }
   }
+  CUDA_CHECK(cudaEventRecord(decode_stop));
+  CUDA_CHECK(cudaEventSynchronize(prefill_stop));
+  CUDA_CHECK(cudaEventSynchronize(decode_stop));
+  CUDA_CHECK(cudaEventElapsedTime(&result.prefill_ms, prefill_start, prefill_stop));
+  CUDA_CHECK(cudaEventElapsedTime(&result.decode_ms, decode_start, decode_stop));
+  cudaEventDestroy(prefill_start);
+  cudaEventDestroy(prefill_stop);
+  cudaEventDestroy(decode_start);
+  cudaEventDestroy(decode_stop);
   result.steps = steps;
   return result;
 }

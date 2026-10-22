@@ -91,7 +91,9 @@ DecodeResult run_decode(DeviceWeights* weights, const uint16_t* audio_embeds_dev
 
 struct DecodeBatchResult {
   std::vector<std::vector<int64_t>> per_chunk_ids;
-  int steps = 0;  // decode steps executed (lockstep)
+  int steps = 0;   // decode steps executed (lockstep)
+  float prefill_ms = 0.0f;
+  float decode_ms = 0.0f;
 };
 
 // Cross-chunk batched decode: audio_embeds_device is [chunks*375, 2048] FP16
