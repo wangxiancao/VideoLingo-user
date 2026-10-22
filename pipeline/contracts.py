@@ -58,6 +58,7 @@ class StageContext:
     validate_only: bool
     artifacts: Mapping[str, Artifact]
     codec: Any
+    llm_service: Any = None
 
     def path(self, key: str) -> Path:
         artifact = self.artifacts.get(key)

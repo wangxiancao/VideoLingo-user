@@ -118,7 +118,7 @@ def run(ctx) -> None:
     if not words:
         raise StageError("segment: transcript has no words")
 
-    client = create_llm_client(ctx.config, ctx.llm_fixture)
+    client = create_llm_client(ctx.config, ctx.llm_fixture, ctx.llm_service)
     request = {
         "language": transcript["language"],
         "words": [{"index": index, "text": text} for index, text in enumerate(words)],

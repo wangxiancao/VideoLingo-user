@@ -72,6 +72,33 @@ def _check_llm_fixture(path: str | Path | None) -> Path | None:
     return fixture
 
 
+LLM_STAGE_IDS = frozenset({"segment", "translate"})
+
+
+def _maybe_start_local_llm(selected, config, fixture, validate_only):
+    """Start the managed local LLM service when the run will call an LLM stage.
+
+    Fixture mode and --validate-only never need the service (spec #32 D1/D3).
+    The service is stopped by the caller's finally block on success, stage
+    error and interpreter exit alike; SIGKILL of the parent is covered by
+    PR_SET_PDEATHSIG inside the server.
+    """
+    if validate_only or fixture is not None:
+        return None
+    if not config.get("llm.local.enabled", False):
+        return None
+    if not any(stage.id in LLM_STAGE_IDS for stage in selected):
+        return None
+    from pipeline.llm.local_service import start_local_llm_service
+
+    try:
+        return start_local_llm_service(config)
+    except PipelineError:
+        raise
+    except Exception as exc:
+        raise StageError(f"local llm service failed to start: {exc}") from exc
+
+
 def _check_requires(
     stage: StageSpec,
     ctx: StageContext,
@@ -169,9 +196,22 @@ def run(
             artifacts=ARTIFACTS,
             codec=codec,
         )
-        for stage in selected:
-            _run_stage(stage, ctx, stages, validate_only)
-        return EXIT_OK
+        service = _maybe_start_local_llm(selected, config, fixture, validate_only)
+        if service is not None:
+            ctx.llm_service = service
+        try:
+            for stage in selected:
+                _run_stage(stage, ctx, stages, validate_only)
+            return EXIT_OK
+        finally:
+            if service is not None:
+                service.stop()
+                if service.shutdown_seconds is not None:
+                    print(
+                        f"local llm service shutdown: "
+                        f"{service.shutdown_seconds:.1f}s",
+                        file=sys.stderr,
+                    )
     except (UsageError, ConfigError, MissingInputError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_USAGE
