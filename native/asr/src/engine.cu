@@ -546,6 +546,179 @@ __global__ void flash_attention_v2_kernel(const half* __restrict__ q,
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// FA2-v3: online-softmax fused attention. Unlike v1/v2, the score tile and
+// softmax statistics live entirely in wmma accumulator fragments (the
+// m16n16k16 fp32 C layout maps lane -> rows {lane/4, lane/4+8}, cols
+// {2*(lane%4), +1, +8, +9}), so the only shared-memory traffic per K tile is
+// one fp16 P staging buffer reload as a matrix_a fragment. Br=64 rows per
+// block (4 warps x 16), Bc=64 keys, head_dim=64. Optional causal mask.
+// ---------------------------------------------------------------------------
+__device__ __forceinline__ float sL_hint(const float* sL, int r) { return sL[r]; }
+
+// ---------------------------------------------------------------------------
+// FA2-v3 fused attention (see docs/agents/native-asr-m2.md section 5).
+// Scores and softmax live in wmma accumulator fragments; the m16n16k16 fp32
+// C layout maps lane -> rows {lane/4, lane/4+8}, element e -> row half
+// (e in {0,1,4,5} -> lane/4, else lane/4+8) and col offset
+// n*16 + (e&4 ? 8:0) + 2*(lane%4) + (e&1). Only P transits smem (fp16,
+// reloaded as a matrix_a fragment). Br=64, Bc=64, 4 warps, head_dim=64.
+// ---------------------------------------------------------------------------
+__global__ void flash_attention_v3_kernel(const half* __restrict__ q,
+                                          const half* __restrict__ k,
+                                          const half* __restrict__ v,
+                                          half* __restrict__ out, int seq, int dim,
+                                          int query_tiles, bool causal) {
+  using namespace nvcuda;
+  const int tile = blockIdx.x;
+  const int b = blockIdx.y;
+  if (tile >= query_tiles) return;
+
+  extern __shared__ char smem_raw[];
+  half* sQ = reinterpret_cast<half*>(smem_raw);
+  half* sK = sQ + kFlashTile * kFlashTile;
+  half* sV = sK + kFlashTile * kFlashTile;
+  half* sP = sV + kFlashTile * kFlashTile;
+  float* sO = reinterpret_cast<float*>(sP + kFlashTile * kFlashTile);
+  float* sM = sO + kFlashTile * kFlashTile;
+  float* sL = sM + kFlashTile;
+
+  const int q0 = tile * kFlashTile;
+  const int tid = threadIdx.x;
+  const int warp = tid / 32;
+  const int lane = tid % 32;
+  const int row_base = warp * 16;
+  const float scale = 0.125f;
+
+  for (int i = tid; i < kFlashTile * kFlashTile; i += blockDim.x) {
+    const int r = i / kFlashTile, c = i % kFlashTile;
+    const int row = q0 + r;
+    sQ[i] = (row < seq) ? q[(static_cast<size_t>(b) * seq + row) * dim + c]
+                        : __float2half(0.0f);
+  }
+  __syncthreads();
+
+  const int row_lo = row_base + lane / 4;
+  const int row_hi = row_base + lane / 4 + 8;
+  float m0 = -1e30f, m1 = -1e30f, l0 = 0.0f, l1 = 0.0f;
+
+  wmma::fragment<wmma::accumulator, 16, 16, 16, float> oacc[4];
+  for (int n = 0; n < 4; ++n) wmma::fill_fragment(oacc[n], 0.0f);
+
+  const int key_tiles = (seq + kFlashTile - 1) / kFlashTile;
+
+  for (int kt = 0; kt < key_tiles; ++kt) {
+    if (causal && kt * kFlashTile > q0 + kFlashTile - 1) break;
+    for (int i = tid; i < kFlashTile * kFlashTile; i += blockDim.x) {
+      const int r = i / kFlashTile, c = i % kFlashTile;
+      const int key = kt * kFlashTile + r;
+      sK[i] = (key < seq) ? k[(static_cast<size_t>(b) * seq + key) * dim + c]
+                          : __float2half(0.0f);
+      sV[i] = (key < seq) ? v[(static_cast<size_t>(b) * seq + key) * dim + c]
+                          : __float2half(0.0f);
+    }
+    __syncthreads();
+
+    wmma::fragment<wmma::accumulator, 16, 16, 16, float> sacc[4];
+    {
+      wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a;
+      wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::col_major> bf;
+      for (int n = 0; n < 4; ++n) {
+        wmma::fill_fragment(sacc[n], 0.0f);
+        for (int kk = 0; kk < 4; ++kk) {
+          wmma::load_matrix_sync(a, sQ + row_base * kFlashTile + kk * 16,
+                                 kFlashTile);
+          wmma::load_matrix_sync(bf, sK + n * 16 * kFlashTile + kk * 16,
+                                 kFlashTile);
+          wmma::mma_sync(sacc[n], a, bf, sacc[n]);
+        }
+      }
+    }
+
+    // Element value + validity, shared by the max and exp passes.
+    auto elem = [&](int n, int e, float& val, int& key, int& row) {
+      val = sacc[n].x[e] * scale;
+      key = kt * kFlashTile + n * 16 + ((e & 4) ? 8 : 0) + 2 * (lane % 4) + (e & 1);
+      row = (e == 0 || e == 1 || e == 4 || e == 5) ? row_lo : row_hi;
+      if (key >= seq || (causal && key > q0 + row)) val = -1e30f;
+    };
+
+    float local0 = -1e30f, local1 = -1e30f;
+    for (int n = 0; n < 4; ++n)
+      for (int e = 0; e < 8; ++e) {
+        float val; int key, row;
+        elem(n, e, val, key, row);
+        if (row == row_lo) local0 = fmaxf(local0, val);
+        else local1 = fmaxf(local1, val);
+      }
+    for (int off = 1; off <= 2; off <<= 1) {
+      local0 = fmaxf(local0, __shfl_xor_sync(0xffffffff, local0, off));
+      local1 = fmaxf(local1, __shfl_xor_sync(0xffffffff, local1, off));
+    }
+    const float tile_m0 = fmaxf(m0, local0);
+    const float tile_m1 = fmaxf(m1, local1);
+    const float corr0 = (l0 > 0.0f) ? __expf(m0 - tile_m0) : 0.0f;
+    const float corr1 = (l1 > 0.0f) ? __expf(m1 - tile_m1) : 0.0f;
+
+    float add0 = 0.0f, add1 = 0.0f;
+    for (int n = 0; n < 4; ++n) {
+      float* o = oacc[n].x;
+      o[0] *= corr0; o[1] *= corr0; o[4] *= corr0; o[5] *= corr0;
+      o[2] *= corr1; o[3] *= corr1; o[6] *= corr1; o[7] *= corr1;
+      for (int e = 0; e < 8; ++e) {
+        float val; int key, row;
+        elem(n, e, val, key, row);
+        const float p = __expf(val - (row == row_lo ? tile_m0 : tile_m1));
+        sP[row * kFlashTile + key - kt * kFlashTile] = __float2half(p);
+        if (row == row_lo) add0 += p; else add1 += p;
+      }
+    }
+    for (int off = 1; off <= 2; off <<= 1) {
+      add0 += __shfl_xor_sync(0xffffffff, add0, off);
+      add1 += __shfl_xor_sync(0xffffffff, add1, off);
+    }
+    l0 = l0 * corr0 + add0;
+    l1 = l1 * corr1 + add1;
+    m0 = tile_m0;
+    m1 = tile_m1;
+    __syncthreads();
+
+    {
+      wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> pa;
+      wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> vb;
+      for (int n = 0; n < 4; ++n)
+        for (int kk = 0; kk < 4; ++kk) {
+          wmma::load_matrix_sync(pa, sP + row_base * kFlashTile + kk * 16,
+                                 kFlashTile);
+          wmma::load_matrix_sync(vb, sV + kk * 16 * kFlashTile + n * 16,
+                                 kFlashTile);
+          wmma::mma_sync(oacc[n], pa, vb, oacc[n]);
+        }
+    }
+    __syncthreads();
+  }
+
+  for (int n = 0; n < 4; ++n)
+    wmma::store_matrix_sync(sO + row_base * kFlashTile + n * 16, oacc[n],
+                            kFlashTile, wmma::mem_row_major);
+  // Flush per-thread stats to smem (lane%4==0 owns the row pair).
+  if (lane % 4 == 0) {
+    sM[row_lo] = m0; sL[row_lo] = l0;
+    sM[row_hi] = m1; sL[row_hi] = l1;
+  }
+  __syncthreads();
+  for (int i = tid; i < kFlashTile * kFlashTile; i += blockDim.x) {
+    const int r = i / kFlashTile, c = i % kFlashTile;
+    const int row = q0 + r;
+    if (row < seq) {
+      const float l = sL[r];
+      out[(static_cast<size_t>(b) * seq + row) * dim + c] =
+          __float2half(l > 0.0f ? sO[i] / l : 0.0f);
+    }
+  }
+}
+
 // im2col for the conv frontend. conv1 gathers [chunk,t] rows of 384 taps
 // from mel [chunks,128,3000]; conv2 gathers [chunk,t] rows of 3840 taps from
 // the (t,c)-layout conv1 output. Boundary taps stay zero (padding 1).
@@ -1214,6 +1387,67 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
       const long long head_stride = static_cast<long long>(kFrames) * kHeadDim;
       const long long score_stride = static_cast<long long>(kFrames) * kFrames;
       const char* attn_mode = getenv("M2_ATTN");
+      if (attn_mode && std::string(attn_mode) == "flashv3") {
+        const int query_tiles = (kFrames + kFlashTile - 1) / kFlashTile;
+        const size_t v3_smem = 3 * kFlashTile * kFlashTile * sizeof(half) +
+                               kFlashTile * kFlashTile * sizeof(half) +
+                               kFlashTile * kFlashTile * sizeof(float) +
+                               2 * kFlashTile * sizeof(float);
+        static bool v3_configured = false;
+        if (!v3_configured) {
+          CUDA_CHECK(cudaFuncSetAttribute(flash_attention_v3_kernel,
+                                          cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                          static_cast<int>(v3_smem)));
+          v3_configured = true;
+        }
+        flash_attention_v3_kernel<<<dim3(query_tiles, batch), 128, v3_smem>>>(
+            d_q_hm.get(), d_k_hm.get(), d_v_hm.get(), d_attn_hm.get(), kFrames,
+            kHeadDim, query_tiles, false);
+        CUDA_CHECK(cudaGetLastError());
+        gather_heads_kernel<<<static_cast<unsigned>((total + 255) / 256), 256>>>(
+            d_attn_hm.get(), d_attn.get(), rows, chunks);
+        CUDA_CHECK(cudaGetLastError());
+        tock(t_attn);
+        tick();
+        linear_rows(weight(prefix + "self_attn.o_proj.weight"),
+                    weight(prefix + "self_attn.o_proj.bias"), d_attn.get(),
+                    d_scratch.get(), rows, kHidden, kHidden);
+        tock(t_gemm);
+        CUDA_CHECK(cudaMemcpy(d_attn.get(), d_scratch.get(), hidden_count * sizeof(half),
+                              cudaMemcpyDeviceToDevice));
+        tock(t_cpy);
+        tick();
+        residual_add_kernel<<<static_cast<unsigned>((hidden_count + 255) / 256), 256>>>(
+            d_hidden.get(), d_attn.get(), hidden_count);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaMemcpy(d_ln.get(), d_hidden.get(), hidden_count * sizeof(half),
+                              cudaMemcpyDeviceToDevice));
+        layer_norm_kernel<<<rows, 256, 2 * 256 * sizeof(float)>>>(
+            d_ln.get(), weight(prefix + "post_attention_layernorm.weight"),
+            weight(prefix + "post_attention_layernorm.bias"), rows, kHidden);
+        CUDA_CHECK(cudaGetLastError());
+        tock(t_elt);
+        tick();
+        linear_rows(weight(prefix + "mlp.fc1.weight"), weight(prefix + "mlp.fc1.bias"),
+                    d_ln.get(), d_mlp.get(), rows, kIntermediate, kHidden);
+        tock(t_gemm);
+        tick();
+        gelu_kernel<<<static_cast<unsigned>((mlp_count + 255) / 256), 256>>>(
+            d_mlp.get(), mlp_count);
+        CUDA_CHECK(cudaGetLastError());
+        tock(t_elt);
+        tick();
+        linear_rows(weight(prefix + "mlp.fc2.weight"), weight(prefix + "mlp.fc2.bias"),
+                    d_mlp.get(), d_attn.get(), rows, kHidden, kIntermediate);
+        tock(t_gemm);
+        tick();
+        residual_add_kernel<<<static_cast<unsigned>((hidden_count + 255) / 256), 256>>>(
+            d_hidden.get(), d_attn.get(), hidden_count);
+        CUDA_CHECK(cudaGetLastError());
+        tock(t_elt);
+        continue;
+      }
+      const char* attn_mode_unused = attn_mode;
       if (attn_mode && std::string(attn_mode) == "flash") {
         const int query_tiles = (kFrames + kFlashTile - 1) / kFlashTile;
         const size_t v2_smem =
