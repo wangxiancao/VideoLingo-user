@@ -36,6 +36,26 @@ using ExecutionError = ModelExecutionError;
       throw ExecutionError(std::string(#expr " failed: ") + cudaGetErrorString(status_)); \
   } while (false)
 
+// Reads a whole multi-chunk PCM file (chunks * 480000 samples, no looping).
+std::vector<float> read_pcm_long(const std::string& pcm_path, int* chunks_out) {
+  std::ifstream in(pcm_path, std::ios::binary);
+  if (!in) throw InvalidInput("cannot open PCM file: " + pcm_path);
+  in.seekg(0, std::ios::end);
+  const uint64_t bytes = static_cast<uint64_t>(in.tellg());
+  if (bytes % (static_cast<uint64_t>(kChunkSamples) * sizeof(float)) != 0)
+    throw InvalidInput("long PCM file size is not a multiple of the 30 s chunk");
+  const uint64_t file_chunks = bytes / (static_cast<uint64_t>(kChunkSamples) * sizeof(float));
+  if (file_chunks == 0 || file_chunks > 128)
+    throw InvalidInput("long PCM file must contain 1..128 chunks");
+  std::vector<float> pcm(static_cast<size_t>(file_chunks) * kChunkSamples);
+  in.seekg(0, std::ios::beg);
+  in.read(reinterpret_cast<char*>(pcm.data()),
+          static_cast<std::streamsize>(pcm.size() * sizeof(float)));
+  if (!in) throw ExecutionError("short read from PCM file");
+  *chunks_out = static_cast<int>(file_chunks);
+  return pcm;
+}
+
 // Reads raw little-endian f32 mono PCM and zero-pads to the 30 s chunk.
 std::vector<float> read_pcm_padded(const std::string& pcm_path, uint64_t samples_requested,
                                    bool samples_given) {
@@ -212,7 +232,7 @@ int run_mel(int argc, char** argv) {
 }  // namespace
 
 int run_encode(int argc, char** argv) {
-  std::string model_dir, pcm_path, out_dir;
+  std::string model_dir, pcm_path, out_dir, long_pcm_path;
   bool fp16_accumulate = true;
   uint64_t samples = 0;
   bool samples_given = false;
@@ -227,6 +247,8 @@ int run_encode(int argc, char** argv) {
       model_dir = next_value();
     } else if (arg == "--pcm") {
       pcm_path = next_value();
+    } else if (arg == "--pcm-long") {
+      long_pcm_path = next_value();
     } else if (arg == "--out-dir") {
       out_dir = next_value();
     } else if (arg == "--samples") {
@@ -253,13 +275,19 @@ int run_encode(int argc, char** argv) {
       throw InvalidInput("unknown encode argument: " + arg);
     }
   }
-  if (model_dir.empty() || pcm_path.empty() || out_dir.empty())
-    throw InvalidInput("encode mode requires --model-dir, --pcm and --out-dir");
+  if (model_dir.empty() || out_dir.empty() || (pcm_path.empty() && long_pcm_path.empty()))
+    throw InvalidInput("encode mode requires --model-dir, --pcm/--pcm-long and --out-dir");
 
-  const std::vector<float> single = read_pcm_padded(pcm_path, samples, samples_given);
   std::vector<float> pcm;
-  pcm.reserve(single.size() * chunks);
-  for (int i = 0; i < chunks; ++i) pcm.insert(pcm.end(), single.begin(), single.end());
+  if (!long_pcm_path.empty()) {
+    int long_chunks = 1;
+    pcm = read_pcm_long(long_pcm_path, &long_chunks);
+    chunks = long_chunks;
+  } else {
+    const std::vector<float> single = read_pcm_padded(pcm_path, samples, samples_given);
+    pcm.reserve(single.size() * chunks);
+    for (int i = 0; i < chunks; ++i) pcm.insert(pcm.end(), single.begin(), single.end());
+  }
   const MelOutput mel = compute_mel_batched(pcm, chunks);
   DeviceWeights weights = load_weights_resident(model_dir, 16384ull * 1024 * 1024);
 
@@ -306,7 +334,7 @@ int run_encode(int argc, char** argv) {
 }
 
 int run_transcribe(int argc, char** argv) {
-  std::string model_dir, pcm_path, prompt_path;
+  std::string model_dir, pcm_path, prompt_path, long_pcm_path;
   bool fp16_accumulate = true;
   bool prefill_batched = true;
   int max_new_tokens = 256;
@@ -325,6 +353,8 @@ int run_transcribe(int argc, char** argv) {
       if (value == "16") fp16_accumulate = true;
       else if (value == "32") fp16_accumulate = false;
       else throw InvalidInput("--gemm-acc must be 16 or 32");
+    } else if (arg == "--pcm-long") {
+      long_pcm_path = next_value();
     } else if (arg == "--chunks") {
       const std::string value = next_value();
       char* end = nullptr;
@@ -348,8 +378,10 @@ int run_transcribe(int argc, char** argv) {
       throw InvalidInput("unknown transcribe argument: " + arg);
     }
   }
-  if (model_dir.empty() || pcm_path.empty() || prompt_path.empty())
-    throw InvalidInput("transcribe mode requires --model-dir, --pcm and --prompt-ids");
+  if (model_dir.empty() || prompt_path.empty() ||
+      (pcm_path.empty() && long_pcm_path.empty()))
+    throw InvalidInput(
+        "transcribe mode requires --model-dir, --pcm/--pcm-long and --prompt-ids");
 
   std::vector<int64_t> prompt_ids;
   {
@@ -362,10 +394,14 @@ int run_transcribe(int argc, char** argv) {
       if (id < 0 || id > 59263) throw InvalidInput("prompt id out of vocab range");
   }
 
-  std::vector<float> single = read_pcm_padded(pcm_path, 0, false);
   std::vector<float> pcm;
-  pcm.reserve(single.size() * chunks);
-  for (int i = 0; i < chunks; ++i) pcm.insert(pcm.end(), single.begin(), single.end());
+  if (!long_pcm_path.empty()) {
+    pcm = read_pcm_long(long_pcm_path, &chunks);
+  } else {
+    std::vector<float> single = read_pcm_padded(pcm_path, 0, false);
+    pcm.reserve(single.size() * chunks);
+    for (int i = 0; i < chunks; ++i) pcm.insert(pcm.end(), single.begin(), single.end());
+  }
   const MelOutput mel = compute_mel_batched(pcm, chunks);
   DeviceWeights weights = load_weights_resident(model_dir, 16384ull * 1024 * 1024);
 
@@ -443,7 +479,7 @@ int run_transcribe(int argc, char** argv) {
 
 
 int run_bench(int argc, char** argv) {
-  std::string model_dir, pcm_path, prompt_path;
+  std::string model_dir, pcm_path, prompt_path, long_pcm_path;
   bool fp16_accumulate = true;
   int chunks = 120, runs = 3;
   for (int i = 2; i < argc; ++i) {
@@ -454,6 +490,7 @@ int run_bench(int argc, char** argv) {
     };
     if (arg == "--model-dir") model_dir = next_value();
     else if (arg == "--pcm") pcm_path = next_value();
+    else if (arg == "--pcm-long") long_pcm_path = next_value();
     else if (arg == "--prompt-ids") prompt_path = next_value();
     else if (arg == "--chunks") {
       char* end = nullptr;
@@ -474,8 +511,9 @@ int run_bench(int argc, char** argv) {
       throw InvalidInput("unknown bench argument: " + arg);
     }
   }
-  if (model_dir.empty() || pcm_path.empty() || prompt_path.empty())
-    throw InvalidInput("bench mode requires --model-dir, --pcm and --prompt-ids");
+  if (model_dir.empty() || prompt_path.empty() ||
+      (pcm_path.empty() && long_pcm_path.empty()))
+    throw InvalidInput("bench mode requires --model-dir, --pcm/--pcm-long and --prompt-ids");
 
   std::vector<int64_t> prompt_ids;
   {
@@ -485,10 +523,14 @@ int run_bench(int argc, char** argv) {
     while (in >> value) prompt_ids.push_back(value);
     if (prompt_ids.empty()) throw InvalidInput("prompt ids file is empty");
   }
-  std::vector<float> single = read_pcm_padded(pcm_path, 0, false);
   std::vector<float> pcm;
-  pcm.reserve(single.size() * chunks);
-  for (int i = 0; i < chunks; ++i) pcm.insert(pcm.end(), single.begin(), single.end());
+  if (!long_pcm_path.empty()) {
+    pcm = read_pcm_long(long_pcm_path, &chunks);
+  } else {
+    std::vector<float> single = read_pcm_padded(pcm_path, 0, false);
+    pcm.reserve(single.size() * chunks);
+    for (int i = 0; i < chunks; ++i) pcm.insert(pcm.end(), single.begin(), single.end());
+  }
 
   DeviceWeights weights = load_weights_resident(model_dir, 16384ull * 1024 * 1024);
   DecodeOptions decode_options;
@@ -552,7 +594,10 @@ int run_bench(int argc, char** argv) {
             << "  \"schema_version\": 1,\n"
             << "  \"tool\": \"native_asr_m1_bench\",\n"
             << "  \"measurement_kind\": \"diagnostic_shared_gpu\",\n"
-            << "  \"note\": \"synthetic loop of one 30 s fixture; not ASR acceptance evidence\",\n"
+            << "  \"note\": \"" << (long_pcm_path.empty()
+                                            ? "synthetic loop of one 30 s fixture; not ASR acceptance evidence"
+                                            : "real long audio file, chunked sequentially")
+            << "\",\n"
             << "  \"gemm_acc\": \"" << (fp16_accumulate ? "fp16" : "fp32") << "\",\n"
             << "  \"chunks\": " << chunks << ",\n"
             << "  \"runs\": " << runs << ",\n"

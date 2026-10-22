@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "tool": "native_asr_m1_bench",
+  "measurement_kind": "diagnostic_shared_gpu",
+  "note": "synthetic loop of one 30 s fixture; not ASR acceptance evidence",
+  "gemm_acc": "fp16",
+  "chunks": 120,
+  "runs": 3,
+  "steps_median": 72,
+  "stage_ms_median": {"mel": 1801.82, "encoder": 42685.3, "prefill": 2793.41, "decode": 2271.42},
+  "stage_ms_all": {"mel": [1774.48, 1806.83, 1801.82], "encoder": [42685.3, 42709, 42406.9], "prefill": [2800.09, 2783.34, 2793.41], "decode": [2302.7, 2253.57, 2271.42]},
+  "total_stage_ms_median": 49551.9,
+  "replay_gemm_linear_estimate_ms": 3757.845
+}

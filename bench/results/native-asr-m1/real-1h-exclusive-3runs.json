@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "tool": "native_asr_m1_bench",
+  "measurement_kind": "diagnostic_shared_gpu",
+  "note": "real long audio file, chunked sequentially",
+  "gemm_acc": "fp16",
+  "chunks": 120,
+  "runs": 3,
+  "steps_median": 100,
+  "stage_ms_median": {"mel": 413.899, "encoder": 8631.99, "prefill": 2255.22, "decode": 3172.91},
+  "stage_ms_all": {"mel": [388.863, 413.899, 414.424], "encoder": [8700.74, 8631.99, 8630.68], "prefill": [2255.22, 2258.18, 2254.14], "decode": [3174.2, 3172.91, 3160.99]},
+  "total_stage_ms_median": 14474,
+  "replay_gemm_linear_estimate_ms": 3757.845
+}

@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <cublas_v2.h>
 #include <cstdint>
 #include <sstream>
@@ -223,6 +224,19 @@ __global__ void gather_batch_kernel(const int64_t* __restrict__ ids, int prompt_
                 static_cast<size_t>(audio_used) * kTextHidden
           : embed + static_cast<size_t>(id) * kTextHidden;
   half* dst = out + (static_cast<size_t>(chunk) * prompt_length + pos) * kTextHidden;
+  for (int d = threadIdx.x; d < kTextHidden; d += blockDim.x) dst[d] = source[d];
+}
+
+// Per-chunk token embedding rows for lockstep decode: ids [chunks] ->
+// embeddings [chunks, 2048] (unlike the prompt gather, each chunk has its
+// own current token).
+__global__ void gather_ids_batched_kernel(const int64_t* __restrict__ ids,
+                                          const half* __restrict__ embed,
+                                          half* __restrict__ out, int chunks) {
+  const int chunk = blockIdx.x;
+  if (chunk >= chunks) return;
+  const half* source = embed + static_cast<size_t>(ids[chunk]) * kTextHidden;
+  half* dst = out + static_cast<size_t>(chunk) * kTextHidden;
   for (int d = threadIdx.x; d < kTextHidden; d += blockDim.x) dst[d] = source[d];
 }
 
@@ -844,6 +858,18 @@ DecodeResult run_decode(DeviceWeights* weights, const uint16_t* audio_embeds_raw
     int64_t first_token;
     if (options.prefill_batched) {
       first_token = prefill_batched();
+      if (getenv("M2_DUMP_KV")) {
+        const std::string dir = getenv("M2_DUMP_KV");
+        CUDA_CHECK(cudaDeviceSynchronize());
+        const half* k0 = d_kv_cache;  // chunk 0, layer 0 (single-chunk layout)
+        std::vector<half> host(16 * (kTextKvHeads * kTextHeadDim));
+        CUDA_CHECK(cudaMemcpy(host.data(),
+                              k0 + static_cast<size_t>(100) * (kTextKvHeads * kTextHeadDim),
+                              16 * (kTextKvHeads * kTextHeadDim) * sizeof(half),
+                              cudaMemcpyDeviceToHost));
+        std::ofstream out(dir + "/kv_chunk0.f16", std::ios::binary);
+        out.write(reinterpret_cast<const char*>(host.data()), host.size() * sizeof(half));
+      }
     } else {
       // M0 sequential path: run every prompt row through the cache; the last
       // row yields the first generated token.
@@ -879,6 +905,15 @@ DecodeResult run_decode(DeviceWeights* weights, const uint16_t* audio_embeds_raw
                             cudaMemcpyDeviceToDevice));
       const int position = static_cast<int>(prompt_length + step - 1);
       current = forward_position(position, true);
+      if (step == 1 && getenv("M2_DUMP_KV")) {
+        const std::string dir = getenv("M2_DUMP_KV");
+        CUDA_CHECK(cudaDeviceSynchronize());
+        std::vector<half> host(kv_width);
+        CUDA_CHECK(cudaMemcpy(host.data(), d_kv_cache + static_cast<size_t>(position) * kv_width,
+                              kv_width * sizeof(half), cudaMemcpyDeviceToHost));
+        std::ofstream out(dir + "/kvstep1_chunk0.f16", std::ios::binary);
+        out.write(reinterpret_cast<const char*>(host.data()), host.size() * sizeof(half));
+      }
       result.generated_ids.push_back(current);
       if (std::find(eos_ids.begin(), eos_ids.end(), current) != eos_ids.end()) {
         result.stop_reason = 0;
@@ -1167,6 +1202,19 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
     }
   }
 
+  if (getenv("M2_DUMP_KV")) {
+    const std::string dir = getenv("M2_DUMP_KV");
+    CUDA_CHECK(cudaDeviceSynchronize());
+    for (int c = 0; c < std::min(chunks, 4); ++c) {
+      const half* k0 = d_kv_cache + static_cast<size_t>(c) * chunk_kv_stride;  // layer 0
+      std::vector<half> host(16 * kv_width);
+      CUDA_CHECK(cudaMemcpy(host.data(), k0 + static_cast<size_t>(100) * kv_width,
+                            16 * kv_width * sizeof(half), cudaMemcpyDeviceToHost));
+      std::ofstream out(dir + "/kv_chunk" + std::to_string(c) + ".f16",
+                        std::ios::binary);
+      out.write(reinterpret_cast<const char*>(host.data()), host.size() * sizeof(half));
+    }
+  }
   CUDA_CHECK(cudaEventRecord(prefill_stop));
   CUDA_CHECK(cudaEventRecord(decode_start));
   // ---- lockstep decode over the whole batch ----
@@ -1185,9 +1233,9 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
     const int position = L + steps - 1;
     CUDA_CHECK(cudaMemcpy(d_gather_ids, current.data(), chunks * sizeof(int64_t),
                           cudaMemcpyHostToDevice));
-    gather_batch_kernel<<<dim3(1, chunks), 128>>>(
-        d_gather_ids, 1, weight("language_model.model.embed_tokens.weight"),
-        audio_embeds /*unused for non-audio ids*/, 0, d_ids_batch, chunks);
+    gather_ids_batched_kernel<<<chunks, 128>>>(
+        d_gather_ids, weight("language_model.model.embed_tokens.weight"), d_ids_batch,
+        chunks);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaMemcpy(d_h, d_ids_batch, static_cast<size_t>(chunks) * kTextHidden * sizeof(half),
                           cudaMemcpyDeviceToDevice));
@@ -1249,6 +1297,19 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
     std::vector<int64_t> next(chunks);
     CUDA_CHECK(cudaMemcpy(next.data(), d_current_ids, chunks * sizeof(int64_t),
                           cudaMemcpyDeviceToHost));
+    if (steps == 1 && getenv("M2_DUMP_KV")) {
+      const std::string dir = getenv("M2_DUMP_KV");
+      CUDA_CHECK(cudaDeviceSynchronize());
+      for (int c = 0; c < std::min(chunks, 4); ++c) {
+        const half* k0 = d_kv_cache + static_cast<size_t>(c) * chunk_kv_stride;
+        std::vector<half> host(kv_width);
+        CUDA_CHECK(cudaMemcpy(host.data(), k0 + static_cast<size_t>(position) * kv_width,
+                              kv_width * sizeof(half), cudaMemcpyDeviceToHost));
+        std::ofstream out(dir + "/kvstep1_chunk" + std::to_string(c) + ".f16",
+                          std::ios::binary);
+        out.write(reinterpret_cast<const char*>(host.data()), host.size() * sizeof(half));
+      }
+    }
     for (int c = 0; c < chunks; ++c) {
       if (!finished[c]) {
         result.per_chunk_ids[c].push_back(next[c]);

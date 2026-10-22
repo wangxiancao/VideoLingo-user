@@ -384,6 +384,168 @@ __global__ void flash_attention_kernel(const half* __restrict__ q,  // [b, s, d]
   }
 }
 
+
+// Flash attention v2: two-pass, scale-free. Pass A finds each row's global
+// max (QK^T recomputed); pass B accumulates O += P*V with the FINAL max, so
+// the wmma accumulator lives in registers and is never rescaled. S storage
+// keeps shared memory at ~48.5 KB -> 2 blocks/SM.
+__global__ void flash_attention_v2_kernel(const half* __restrict__ q,
+                                          const half* __restrict__ k,
+                                          const half* __restrict__ v,
+                                          half* __restrict__ out, int seq, int dim,
+                                          int query_tiles, bool causal) {
+  using namespace nvcuda;
+  const int tile = blockIdx.x;
+  const int b = blockIdx.y;
+  if (tile >= query_tiles) return;
+  const float scale = 1.0f / sqrtf(static_cast<float>(dim));
+
+  extern __shared__ char smem_raw[];
+  half* sQ = reinterpret_cast<half*>(smem_raw);                       // [64,64]
+  half* sK = sQ + kFlashTile * kFlashTile;                            // [64,64]
+  half* sV = sK + kFlashTile * kFlashTile;                            // [64,64]
+  float* sS = reinterpret_cast<float*>(sV + kFlashTile * kFlashTile); // [64,64]
+  half* sP = reinterpret_cast<half*>(sS + kFlashTile * kFlashTile);   // [64,64]
+  float* sM = reinterpret_cast<float*>(sP + kFlashTile * kFlashTile); // [64]
+  float* sL = sM + kFlashTile;                                        // [64]
+
+  const int q0 = tile * kFlashTile;
+  const int tid = threadIdx.x;
+  for (int i = tid; i < kFlashTile * kFlashTile; i += blockDim.x) {
+    const int r = i / kFlashTile, c = i % kFlashTile;
+    const int row = q0 + r;
+    sQ[i] = (row < seq) ? q[(static_cast<size_t>(b) * seq + row) * dim + c]
+                        : __float2half(0.0f);
+  }
+  for (int r = tid; r < kFlashTile; r += blockDim.x) {
+    sM[r] = -1e30f;
+    sL[r] = 0.0f;
+  }
+  __syncthreads();
+
+  const int key_tiles = (seq + kFlashTile - 1) / kFlashTile;
+  const int warp = tid / 32;
+  const int lane = tid % 32;
+  const int row_base = warp * 16;
+
+  // ---- pass A: global row max (wmma QK^T -> SRAM -> lane-per-row max) ----
+  for (int kt = 0; kt < key_tiles; ++kt) {
+    if (causal && kt * kFlashTile > q0 + kFlashTile - 1) break;
+    for (int i = tid; i < kFlashTile * kFlashTile; i += blockDim.x) {
+      const int r = i / kFlashTile, c = i % kFlashTile;
+      const int key = kt * kFlashTile + r;
+      sK[i] = (key < seq) ? k[(static_cast<size_t>(b) * seq + key) * dim + c]
+                          : __float2half(0.0f);
+    }
+    __syncthreads();
+    {
+      wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a;
+      wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::col_major> bf;
+      wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc;
+      for (int n0 = 0; n0 < kFlashTile; n0 += 16) {
+        wmma::fill_fragment(acc, 0.0f);
+        for (int k0 = 0; k0 < kFlashTile; k0 += 16) {
+          wmma::load_matrix_sync(a, sQ + row_base * kFlashTile + k0, kFlashTile);
+          wmma::load_matrix_sync(bf, sK + n0 * kFlashTile + k0, kFlashTile);
+          wmma::mma_sync(acc, a, bf, acc);
+        }
+        wmma::store_matrix_sync(sS + row_base * kFlashTile + n0, acc, kFlashTile,
+                                wmma::mem_row_major);
+      }
+    }
+    __syncthreads();
+    if (lane < 16) {
+      const int row = row_base + lane;
+      float tile_max = -1e30f;
+      for (int c = 0; c < kFlashTile; ++c) {
+        float value = sS[row * kFlashTile + c] * scale;
+        if (kt * kFlashTile + c >= seq) value = -1e30f;
+        if (causal && kt * kFlashTile + c > q0 + row) value = -1e30f;
+        tile_max = fmaxf(tile_max, value);
+      }
+      sM[row] = fmaxf(sM[row], tile_max);
+    }
+    __syncthreads();
+  }
+
+  // ---- pass B: O += P*V with final max; accumulator stays in registers ----
+  wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> pa;
+  wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> vb;
+  wmma::fragment<wmma::accumulator, 16, 16, 16, float> oacc[4];
+  for (int n0 = 0; n0 < kFlashTile; n0 += 16)
+    wmma::fill_fragment(oacc[n0 / 16], 0.0f);
+
+  for (int kt = 0; kt < key_tiles; ++kt) {
+    if (causal && kt * kFlashTile > q0 + kFlashTile - 1) break;
+    for (int i = tid; i < kFlashTile * kFlashTile; i += blockDim.x) {
+      const int r = i / kFlashTile, c = i % kFlashTile;
+      const int key = kt * kFlashTile + r;
+      sK[i] = (key < seq) ? k[(static_cast<size_t>(b) * seq + key) * dim + c]
+                          : __float2half(0.0f);
+      sV[i] = (key < seq) ? v[(static_cast<size_t>(b) * seq + key) * dim + c]
+                          : __float2half(0.0f);
+    }
+    __syncthreads();
+    {
+      wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a;
+      wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::col_major> bf;
+      wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc;
+      for (int n0 = 0; n0 < kFlashTile; n0 += 16) {
+        wmma::fill_fragment(acc, 0.0f);
+        for (int k0 = 0; k0 < kFlashTile; k0 += 16) {
+          wmma::load_matrix_sync(a, sQ + row_base * kFlashTile + k0, kFlashTile);
+          wmma::load_matrix_sync(bf, sK + n0 * kFlashTile + k0, kFlashTile);
+          wmma::mma_sync(acc, a, bf, acc);
+        }
+        wmma::store_matrix_sync(sS + row_base * kFlashTile + n0, acc, kFlashTile,
+                                wmma::mem_row_major);
+      }
+    }
+    __syncthreads();
+    if (lane < 16) {
+      const int row = row_base + lane;
+      const float m = sM[row];
+      float l_add = 0.0f;
+      for (int c = 0; c < kFlashTile; ++c) {
+        float value = sS[row * kFlashTile + c] * scale;
+        if (kt * kFlashTile + c >= seq) value = -1e30f;
+        if (causal && kt * kFlashTile + c > q0 + row) value = -1e30f;
+        const float p = __expf(value - m);
+        sP[row * kFlashTile + c] = __float2half(p);
+        l_add += p;
+      }
+      sL[row] += l_add;
+    }
+    __syncthreads();
+    for (int n0 = 0; n0 < kFlashTile; n0 += 16) {
+      for (int k0 = 0; k0 < kFlashTile; k0 += 16) {
+        wmma::load_matrix_sync(pa, sP + row_base * kFlashTile + k0, kFlashTile);
+        wmma::load_matrix_sync(vb, sV + k0 * kFlashTile + n0, kFlashTile);
+        wmma::mma_sync(oacc[n0 / 16], pa, vb, oacc[n0 / 16]);
+      }
+    }
+    __syncthreads();
+  }
+
+  // store O / l through SRAM (one 16x16 tile at a time reusing sS as float)
+  for (int n0 = 0; n0 < kFlashTile; n0 += 16) {
+    wmma::store_matrix_sync(sS + row_base * kFlashTile + n0, oacc[n0 / 16], kFlashTile,
+                            wmma::mem_row_major);
+    __syncthreads();
+    if (lane < 16) {
+      const int row = row_base + lane;
+      const float l = sL[row];
+      for (int c = 0; c < 16; ++c) {
+        const int row_idx = q0 + row;
+        if (row_idx < seq)
+          out[(static_cast<size_t>(b) * seq + row_idx) * dim + n0 + c] =
+              __float2half(l > 0.0f ? sS[row * kFlashTile + n0 + c] / l : 0.0f);
+      }
+    }
+    __syncthreads();
+  }
+}
+
 // im2col for the conv frontend. conv1 gathers [chunk,t] rows of 384 taps
 // from mel [chunks,128,3000]; conv2 gathers [chunk,t] rows of 3840 taps from
 // the (t,c)-layout conv1 output. Boundary taps stay zero (padding 1).
@@ -807,6 +969,8 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
   const size_t hidden_count = static_cast<size_t>(rows) * kHidden;
   const size_t mlp_count = static_cast<size_t>(rows) * kIntermediate;
   const size_t chunk_hidden = static_cast<size_t>(kFrames) * kHidden;
+  const int dump_chunk = getenv("M2_DUMP_CHUNK") ? atoi(getenv("M2_DUMP_CHUNK")) : 0;
+  const size_t dump_offset = static_cast<size_t>(dump_chunk) * chunk_hidden;
   const size_t score_count = static_cast<size_t>(kHeads) * kFrames * kFrames;
 
   // Persistent workspace: sized once for the 8-chunk group ceiling and reused
@@ -958,7 +1122,7 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
     }
     if (options.dump_stages) {
       out.conv_hidden.resize(chunk_hidden);
-      to_host_float(d_hidden.get(), chunk_hidden, out.conv_hidden.data());
+      to_host_float(d_hidden.get() + dump_offset, chunk_hidden, out.conv_hidden.data());
     }
   }
 
@@ -1011,6 +1175,67 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
       const int batch = chunks * kHeads;
       const long long head_stride = static_cast<long long>(kFrames) * kHeadDim;
       const long long score_stride = static_cast<long long>(kFrames) * kFrames;
+      const char* attn_mode = getenv("M2_ATTN");
+      if (attn_mode && std::string(attn_mode) == "flash") {
+        const int query_tiles = (kFrames + kFlashTile - 1) / kFlashTile;
+        const size_t v2_smem =
+            3 * kFlashTile * kFlashTile * sizeof(half) +
+            kFlashTile * kFlashTile * sizeof(float) + kFlashTile * kFlashTile * sizeof(half) +
+            2 * kFlashTile * sizeof(float);
+        static bool v2_configured = false;
+        if (!v2_configured) {
+          CUDA_CHECK(cudaFuncSetAttribute(flash_attention_v2_kernel,
+                                          cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                          static_cast<int>(v2_smem)));
+          v2_configured = true;
+        }
+        flash_attention_v2_kernel<<<dim3(query_tiles, batch), 128, v2_smem>>>(
+            d_q_hm.get(), d_k_hm.get(), d_v_hm.get(), d_attn_hm.get(), kFrames, kHeadDim,
+            query_tiles, false);
+        CUDA_CHECK(cudaGetLastError());
+        gather_heads_kernel<<<static_cast<unsigned>((total + 255) / 256), 256>>>(
+            d_attn_hm.get(), d_attn.get(), rows, chunks);
+        CUDA_CHECK(cudaGetLastError());
+        tock(t_attn);
+        tick();
+        linear_rows(weight(prefix + "self_attn.o_proj.weight"),
+                    weight(prefix + "self_attn.o_proj.bias"), d_attn.get(), d_scratch.get(),
+                    rows, kHidden, kHidden);
+        tock(t_gemm);
+        CUDA_CHECK(cudaMemcpy(d_attn.get(), d_scratch.get(), hidden_count * sizeof(half),
+                              cudaMemcpyDeviceToDevice));
+        tock(t_cpy);
+        tick();
+        residual_add_kernel<<<static_cast<unsigned>((hidden_count + 255) / 256), 256>>>(
+            d_hidden.get(), d_attn.get(), hidden_count);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaMemcpy(d_ln.get(), d_hidden.get(), hidden_count * sizeof(half),
+                              cudaMemcpyDeviceToDevice));
+        layer_norm_kernel<<<rows, 256, 2 * 256 * sizeof(float)>>>(
+            d_ln.get(), weight(prefix + "post_attention_layernorm.weight"),
+            weight(prefix + "post_attention_layernorm.bias"), rows, kHidden);
+        CUDA_CHECK(cudaGetLastError());
+        tock(t_elt);
+        tick();
+        linear_rows(weight(prefix + "mlp.fc1.weight"), weight(prefix + "mlp.fc1.bias"),
+                    d_ln.get(), d_mlp.get(), rows, kIntermediate, kHidden);
+        tock(t_gemm);
+        tick();
+        gelu_kernel<<<static_cast<unsigned>((mlp_count + 255) / 256), 256>>>(d_mlp.get(),
+                                                                             mlp_count);
+        CUDA_CHECK(cudaGetLastError());
+        tock(t_elt);
+        tick();
+        linear_rows(weight(prefix + "mlp.fc2.weight"), weight(prefix + "mlp.fc2.bias"),
+                    d_mlp.get(), d_attn.get(), rows, kHidden, kIntermediate);
+        tock(t_gemm);
+        tick();
+        residual_add_kernel<<<static_cast<unsigned>((hidden_count + 255) / 256), 256>>>(
+            d_hidden.get(), d_attn.get(), hidden_count);
+        CUDA_CHECK(cudaGetLastError());
+        tock(t_elt);
+        continue;  // flash path handled this layer's remainder
+      }
       // NOTE: the wmma flash_attention_kernel below is numerically correct but
       // currently slower than the materialized path (1 block/SM occupancy);
       // it stays in the tree for a tuning pass (M2 backlog).
@@ -1074,7 +1299,7 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
 
     if (options.dump_stages) {
       out.layer_hidden.resize(chunk_hidden * (layer + 1));
-      to_host_float(d_hidden.get(), chunk_hidden,
+      to_host_float(d_hidden.get() + dump_offset, chunk_hidden,
                     out.layer_hidden.data() + chunk_hidden * layer);
     }
   }
@@ -1085,7 +1310,7 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
   CUDA_CHECK(cudaGetLastError());
   if (options.dump_stages) {
     out.final_norm.resize(chunk_hidden);
-    to_host_float(d_hidden.get(), chunk_hidden, out.final_norm.data());
+    to_host_float(d_hidden.get() + dump_offset, chunk_hidden, out.final_norm.data());
   }
 
   linear_rows(weight("multi_modal_projector.linear_1.weight"),
@@ -1105,8 +1330,9 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
   }
   if (options.dump_stages) {
     out.projector.resize(static_cast<size_t>(kTokens) * kTextHidden);
-    to_host_float(d_proj_out.get(), static_cast<size_t>(kTokens) * kTextHidden,
-                  out.projector.data());
+    to_host_float(d_proj_out.get() +
+                      static_cast<size_t>(dump_chunk) * kTokens * kTextHidden,
+                  static_cast<size_t>(kTokens) * kTextHidden, out.projector.data());
   }
   CUDA_CHECK(cudaDeviceSynchronize());
   if (stage_timing)
