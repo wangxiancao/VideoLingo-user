@@ -21,7 +21,7 @@ target_compile_options(glm_gemm_replay PRIVATE
 )
 target_link_libraries(glm_gemm_replay PRIVATE cublas)
 
-add_executable(glm_asr_m0 src/model_loader.cu src/mel_frontend.cu src/engine.cu src/main_m0.cu)
+add_executable(glm_asr_m0 src/model_loader.cu src/mel_frontend.cu src/engine.cu src/decoder.cu src/main_m0.cu)
 target_include_directories(glm_asr_m0 PRIVATE src)
 target_compile_options(glm_asr_m0 PRIVATE
   $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wpedantic>

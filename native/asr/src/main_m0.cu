@@ -17,6 +17,8 @@
 #include <string>
 #include <vector>
 
+#include <cuda_runtime.h>
+
 #include "engine.h"
 #include "mel_frontend.h"
 #include "model_loader.h"
@@ -277,11 +279,89 @@ int run_encode(int argc, char** argv) {
   return 0;
 }
 
+int run_transcribe(int argc, char** argv) {
+  std::string model_dir, pcm_path, prompt_path;
+  bool fp16_accumulate = true;
+  int max_new_tokens = 256;
+  for (int i = 2; i < argc; ++i) {
+    const std::string arg = argv[i];
+    const auto next_value = [&]() -> std::string {
+      if (i + 1 >= argc) throw InvalidInput("missing value for " + arg);
+      return argv[++i];
+    };
+    if (arg == "--model-dir") model_dir = next_value();
+    else if (arg == "--pcm") pcm_path = next_value();
+    else if (arg == "--prompt-ids") prompt_path = next_value();
+    else if (arg == "--gemm-acc") {
+      const std::string value = next_value();
+      if (value == "16") fp16_accumulate = true;
+      else if (value == "32") fp16_accumulate = false;
+      else throw InvalidInput("--gemm-acc must be 16 or 32");
+    } else if (arg == "--max-new-tokens") {
+      const std::string value = next_value();
+      char* end = nullptr;
+      const long parsed = std::strtol(value.c_str(), &end, 10);
+      if (value.empty() || !end || *end != '\0' || parsed <= 0 || parsed > 1024)
+        throw InvalidInput("--max-new-tokens is out of range: " + value);
+      max_new_tokens = static_cast<int>(parsed);
+    } else {
+      throw InvalidInput("unknown transcribe argument: " + arg);
+    }
+  }
+  if (model_dir.empty() || pcm_path.empty() || prompt_path.empty())
+    throw InvalidInput("transcribe mode requires --model-dir, --pcm and --prompt-ids");
+
+  std::vector<int64_t> prompt_ids;
+  {
+    std::ifstream in(prompt_path);
+    if (!in) throw InvalidInput("cannot open prompt ids file: " + prompt_path);
+    long value;
+    while (in >> value) prompt_ids.push_back(value);
+    if (prompt_ids.empty()) throw InvalidInput("prompt ids file is empty");
+    for (int64_t id : prompt_ids)
+      if (id < 0 || id > 59263) throw InvalidInput("prompt id out of vocab range");
+  }
+
+  const std::vector<float> pcm = read_pcm_padded(pcm_path, 0, false);
+  const MelOutput mel = compute_mel(pcm);
+  DeviceWeights weights = load_weights_resident(model_dir, 16384ull * 1024 * 1024);
+
+  std::vector<uint16_t> audio_device(375 * 2048);
+  void* device_audio = nullptr;
+  EncodeOptions encode_options;
+  encode_options.fp16_accumulate = fp16_accumulate;
+  if (cudaMalloc(&device_audio, audio_device.size() * sizeof(uint16_t)) != cudaSuccess)
+    throw ExecutionError("cudaMalloc failed for audio embeds");
+  run_encode(mel.features, &weights, encode_options,
+             static_cast<uint16_t*>(device_audio));
+
+  DecodeOptions decode_options;
+  decode_options.fp16_accumulate = fp16_accumulate;
+  decode_options.max_new_tokens = max_new_tokens;
+  const DecodeResult decoded =
+      run_decode(&weights, static_cast<const uint16_t*>(device_audio), prompt_ids,
+                 decode_options);
+  cudaFree(device_audio);
+
+  std::cout << "{\n"
+            << "  \"schema_version\": 1,\n"
+            << "  \"tool\": \"native_asr_m0_transcribe\",\n"
+            << "  \"measurement_kind\": \"correctness_only\",\n"
+            << "  \"gemm_acc\": \"" << (fp16_accumulate ? "fp16" : "fp32") << "\",\n"
+            << "  \"stop_reason\": " << decoded.stop_reason << ",\n"
+            << "  \"generated_ids\": [";
+  for (size_t i = 0; i < decoded.generated_ids.size(); ++i)
+    std::cout << (i ? ", " : "") << decoded.generated_ids[i];
+  std::cout << "]\n}\n";
+  return 0;
+}
+
 int main(int argc, char** argv) {
   try {
     const std::string first = argc >= 2 ? argv[1] : "";
     if (first == "mel") return run_mel(argc, argv);
     if (first == "encode") return run_encode(argc, argv);
+    if (first == "transcribe") return run_transcribe(argc, argv);
 
     std::string model_dir;
     bool dump_plan = false;

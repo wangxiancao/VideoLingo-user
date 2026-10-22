@@ -331,7 +331,7 @@ const DeviceWeights::Entry* DeviceWeights::find(const std::string& name) const {
 }
 
 EncodeOutput run_encode(const std::vector<float>& mel_features, DeviceWeights* weights,
-                        const EncodeOptions& options) {
+                        const EncodeOptions& options, uint16_t* projector_device_out) {
   if (mel_features.size() != static_cast<size_t>(kMelBins) * kMelFrames)
     throw ExecutionError("run_encode expects mel features [128,3000]");
   if (!weights->loaded()) throw ExecutionError("run_encode requires loaded weights");
@@ -541,6 +541,11 @@ EncodeOutput run_encode(const std::vector<float>& mel_features, DeviceWeights* w
          weight("multi_modal_projector.linear_2.bias"), d_proj.get(), d_proj_out.get(), kTokens,
          kTextHidden, kProjMid);
   out.projector.resize(static_cast<size_t>(kTokens) * kTextHidden);
+  if (projector_device_out) {
+    CUDA_CHECK(cudaMemcpy(projector_device_out, d_proj_out.get(),
+                          static_cast<size_t>(kTokens) * kTextHidden * sizeof(half),
+                          cudaMemcpyDeviceToDevice));
+  }
   to_host_float(d_proj_out.get(), static_cast<size_t>(kTokens) * kTextHidden, out.projector.data());
   CUDA_CHECK(cudaDeviceSynchronize());
   return out;

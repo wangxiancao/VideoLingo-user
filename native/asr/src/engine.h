@@ -60,5 +60,22 @@ struct EncodeOptions {
 };
 
 // mel_features: [128,3000] row-major. Runs the full audio tower + projector.
+// When projector_device_out is non-null (375*2048 halves, caller-allocated),
+// the FP16 projector output is additionally copied there before returning.
 EncodeOutput run_encode(const std::vector<float>& mel_features,
-                        DeviceWeights* weights, const EncodeOptions& options);
+                        DeviceWeights* weights, const EncodeOptions& options,
+                        uint16_t* projector_device_out = nullptr);
+
+struct DecodeOptions {
+  bool fp16_accumulate = true;
+  int max_new_tokens = 256;
+};
+
+struct DecodeResult {
+  std::vector<int64_t> generated_ids;  // after the prompt
+  int64_t stop_reason = 0;             // 0 eos, 1 budget exhausted
+};
+
+// audio_embeds_device: [375, 2048] FP16 device buffer from run_encode.
+DecodeResult run_decode(DeviceWeights* weights, const uint16_t* audio_embeds_device,
+                        const std::vector<int64_t>& prompt_ids, const DecodeOptions& options);
