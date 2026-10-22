@@ -100,6 +100,11 @@ translation:
   batch_size: 8
   # Cache LLM responses under <workdir>/.llm-cache
   cache: true
+  # *Normalize known ASR garbles before text reaches the local LLM (V4-4).
+  # *Only the request payload is normalized; stored sources stay raw.
+  term_map:
+    '匹秒': '皮秒'
+    '匹苗': '皮秒'
 
 # *Summary length, set low to 2k if using local LLM
 summary_length: 8000

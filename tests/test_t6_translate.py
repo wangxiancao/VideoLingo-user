@@ -136,3 +136,91 @@ def test_translate_batches_segments(tmp_path, monkeypatch):
     data = json.loads((workdir / "translation.json").read_text(encoding="utf-8"))
     assert len(data["segments"]) == 9
     assert data["segments"][-1]["target"] == "refined-9"
+
+class RecordingClient(CountingClient):
+    def __init__(self):
+        super().__init__()
+        self.requests = []
+
+    def complete(self, system, user):
+        with self.lock:
+            self.calls += 1
+            self.requests.append(json.loads(user))
+        ids = [segment["id"] for segment in self.requests[-1]["segments"]]
+        suffix = "faithful" if "faithfully" in system else "refined"
+        return json.dumps(
+            {"translations": [
+                {"id": segment_id, "target": f"{suffix}-{segment_id}"}
+                for segment_id in ids
+            ]}
+        )
+
+
+def test_translate_term_map_normalizes_request_only(tmp_path, monkeypatch):
+    import pipeline.stages.translate as translate_stage
+
+    client = RecordingClient()
+    monkeypatch.setattr(
+        translate_stage, "create_llm_client",
+        lambda _config, _fixture, _service=None: client,
+    )
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    segments = [{
+        "id": 1, "start": 0.0, "end": 2.0, "text": "平均时间是1.96匹秒",
+        "words": [{"start": 0.0, "end": 2.0, "text": "平均时间是1.96匹秒"}],
+    }]
+    (workdir / "segments.json").write_text(
+        json.dumps({"schema_version": 1, "segments": segments}), encoding="utf-8"
+    )
+    config = _config(
+        tmp_path,
+        "translation:\n  term_map:\n    匹秒: 皮秒\n  cache: false\n",
+    )
+
+    assert run("translate", workdir, config) == 0
+    faithful_texts = [segment["text"] for segment in client.requests[0]["segments"]]
+    refine_sources = [segment["source"] for segment in client.requests[1]["segments"]]
+    assert faithful_texts == ["平均时间是1.96皮秒"]
+    assert refine_sources == ["平均时间是1.96皮秒"]
+    data = json.loads((workdir / "translation.json").read_text(encoding="utf-8"))
+    assert data["segments"][0]["source"] == "平均时间是1.96匹秒"
+
+
+class FlakyOnceClient(CountingClient):
+    """Drops a trailing id on the first faithful call, then behaves."""
+
+    def __init__(self):
+        super().__init__()
+        self.poisoned = True
+
+    def complete(self, system, user):
+        with self.lock:
+            self.calls += 1
+        request = json.loads(user)
+        ids = [segment["id"] for segment in request["segments"]]
+        suffix = "faithful" if "faithfully" in system else "refined"
+        items = [{"id": segment_id, "target": f"{suffix}-{segment_id}"}
+                 for segment_id in ids]
+        if self.poisoned and suffix == "faithful":
+            self.poisoned = False
+            items = items[:-1]  # missing trailing id -> contract failure
+        return json.dumps({"translations": items})
+
+
+def test_translate_retries_once_on_missing_ids(tmp_path, monkeypatch):
+    import pipeline.stages.translate as translate_stage
+
+    client = FlakyOnceClient()
+    monkeypatch.setattr(
+        translate_stage, "create_llm_client",
+        lambda _config, _fixture, _service=None: client,
+    )
+    workdir = _workdir(tmp_path)
+    config = _config(tmp_path, "translation:\n  cache: true\n")
+
+    assert run("translate", workdir, config) == 0
+    # faithful failed once (retried) + faithful ok + refine = 3 calls
+    assert client.calls == 3
+    data = json.loads((workdir / "translation.json").read_text(encoding="utf-8"))
+    assert data["segments"][0]["target"].startswith("refined-")

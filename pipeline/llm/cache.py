@@ -31,3 +31,10 @@ class ResponseCache:
         temp = path.with_name(f".{path.name}.tmp")
         temp.write_text(json.dumps({"response": response}, ensure_ascii=False), encoding="utf-8")
         os.replace(temp, path)
+
+    def delete(self, key):
+        """Evict a cached response (e.g. one that failed contract parsing)."""
+        try:
+            self._path(key).unlink()
+        except FileNotFoundError:
+            pass
