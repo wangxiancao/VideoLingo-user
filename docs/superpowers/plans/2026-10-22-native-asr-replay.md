@@ -1,6 +1,6 @@
 # Native ASR primitive replay Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Build a native CUDA executable and a deterministic GLM shape planner
 that compare real-shape FP16 accumulation and W8A8 primitives with reproducible,
@@ -71,20 +71,20 @@ CUBLAS_COMPUTE_16F, with half alpha/beta; FP16-acc32 uses
 CUBLAS_COMPUTE_32F, with float alpha/beta; integer GEMM uses actual INT8 operands
 and INT32 accumulation. Norms/attention are outside this replay's scope.
 
-- [ ] Write a `--self-test` using non-square matrices and a hand-computed
+- [x] Write a `--self-test` using non-square matrices and a hand-computed
   expected output; include a second invocation to catch stale output buffers.
-- [ ] Add negative CLI/manifest checks for zero dimensions, duplicate IDs,
+- [x] Add negative CLI/manifest checks for zero dimensions, duplicate IDs,
   unsupported mode, malformed columns, allocation-size overflow and memory cap.
-- [ ] Implement deterministic device-side inputs, RAII allocations/events and
+- [x] Implement deterministic device-side inputs, RAII allocations/events and
   stream-aware cuBLAS calls; check all CUDA and cuBLAS statuses.
-- [ ] Use CUDA events around all timed GPU work and standard median for odd
+- [x] Use CUDA events around all timed GPU work and standard median for odd
   and even run counts. Warmups and output/reference checks are outside timing.
-- [ ] Verify all output elements on a small deterministic correctness case.
+- [x] Verify all output elements on a small deterministic correctness case.
   For large matrix numerical summaries use a documented deterministic sample
   against FP32-accumulation reference; label sampling in JSON/README.
-- [ ] Build with `cmake -S native/asr -B native/asr/build` and
+- [x] Build with `cmake -S native/asr -B native/asr/build` and
   `cmake --build native/asr/build -j 4`; report unavailable CUDA separately.
-- [ ] On the leader's schedule run `glm_gemm_replay --self-test`, then inspect
+- [x] On the leader's schedule run `glm_gemm_replay --self-test`, then inspect
   `ldd` to confirm no forbidden inference runtime dependency.
 
 ## Task 2: Shape planner, result contract and focused tests
@@ -133,7 +133,7 @@ nonfinite/negative timings. Include `metric_kind=isolated_gemm_estimate`,
 mel, convolutions, attention, norms, activations, residuals, KV, routing,
 tokenization, scheduling and model loading. Do not print ASR RTFx.
 
-- [ ] Write contract tests before implementation. Required cases:
+- [x] Write contract tests before implementation. Required cases:
 
 ```python
 def glm_config():
@@ -171,11 +171,11 @@ def test_summary_cannot_claim_asr_acceptance():
     assert 'attention' in summary['omitted_operations']
 ```
 
-- [ ] Cover non-divisible batches, zero/boolean/oversized parameters, unsupported
+- [x] Cover non-divisible batches, zero/boolean/oversized parameters, unsupported
   model dimensions, stable TSV formatting, missing/extra/duplicate results,
   nonfinite and negative results, even-count medians and CLI missing paths.
-- [ ] Implement the functions and CLI with standard-library imports only.
-- [ ] Run targeted pytest and compileall; ensure importing this module does not
+- [x] Implement the functions and CLI with standard-library imports only.
+- [x] Run targeted pytest and compileall; ensure importing this module does not
   load torch, transformers or any inference framework.
 
 ## Task 3: Integrate, independently verify and record the gate
@@ -183,19 +183,19 @@ def test_summary_cannot_claim_asr_acceptance():
 **Files:** native/asr/README.md, docs/agents/native-asr-replay.md,
 docs/superpowers/plans/2026-10-22-native-asr-replay.md.
 
-- [ ] Generate manifests from the local official config, execute small safe
+- [x] Generate manifests from the local official config, execute small safe
   diagnostic cases in all three modes sequentially and validate JSON results.
-- [ ] Run an available full shape scenario without interfering with other
+- [x] Run an available full shape scenario without interfering with other
   services; label shared-GPU results diagnostic and record compute process IDs,
   model-config SHA256, command, binary SHA256 and commit.
-- [ ] Have an independent verifier run executable self-tests, failure cases,
+- [x] Have an independent verifier run executable self-tests, failure cases,
   the result summarizer and dependency inspection. It must report evidence,
   not change implementation to make checks pass.
-- [ ] Record precision errors, missing operations and limits. Store generated
+- [x] Record precision errors, missing operations and limits. Store generated
   raw experiment output under ignored bench/results/native-asr/; commit a
   small reviewed evidence summary, never large generated tensors.
-- [ ] Commit reviewed changes on feat/native-asr-540 and create a draft PR.
-- [ ] Select the next primitive candidate using measured evidence. Write the
+- [x] Commit reviewed changes on feat/native-asr-540 and create a draft PR.
+- [x] Select the next primitive candidate using measured evidence. Write the
   next independently executable minimal-complete-engine plan before touching
   that subsystem. A successful replay is permission to evaluate that candidate,
   not a claim of 540 or a reason to run the product pipeline.
