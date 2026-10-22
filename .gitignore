@@ -72,6 +72,13 @@ docs/*
 !docs/agents/
 !docs/adr/
 !docs/adr/**
+!docs/superpowers/
+!docs/superpowers/**
+
+# Native ASR build products and reproducible local experiment outputs
+/native/asr/build/
+/bench/results/native-asr/
+/.superpowers/
 
 # PyBuilder
 .pybuilder/
