@@ -72,7 +72,10 @@ def _check_llm_fixture(path: str | Path | None) -> Path | None:
     return fixture
 
 
-LLM_STAGE_IDS = frozenset({"segment", "translate"})
+# Only translate calls the LLM since V4-3 moved segmentation to rules
+# (#32 decision 2026-10-23); the service still starts inside the D3 window
+# (after transcribe, before segment) for full runs because translate runs last.
+LLM_STAGE_IDS = frozenset({"translate"})
 
 
 def _maybe_start_local_llm(selected, config, fixture, validate_only):

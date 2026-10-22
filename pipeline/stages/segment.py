@@ -1,29 +1,15 @@
 import json
 
 from pipeline.contracts import StageError
-from pipeline.llm.contracts import LlmError
-from pipeline.llm.factory import create_llm_client
 
-SYSTEM_PROMPT = (
-    "You split an ordered ASR word stream into natural sentences. "
-    "Return JSON only: {\"sentences\":[{\"start\":0,\"end\":3}, ...]}. "
-    "Indices are half-open [start, end) and must cover every word exactly once, in order."
-)
-
-
-def _parse_json(text):
-    text = str(text).strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise StageError(f"segment: LLM returned invalid JSON: {exc}") from exc
+# V4-3: rule-based segmentation (maintainer-approved fallback, #32 decision
+# 2026-10-23). The V4-1 spike showed HY-MT2-1.8B cannot segment reliably
+# (skipped ranges / mechanical 4-word chunks), so boundaries now come from
+# deterministic word-stream rules; the segments.json contract is unchanged.
+SENTENCE_TERMINALS = (".", "!", "?", "。", "！", "？", "…")
+DEFAULT_PAUSE_S = 0.45
+DEFAULT_MAX_WORDS = 20
+DEFAULT_MAX_DURATION_S = 8.0
 
 
 def _join_words(words, language):
@@ -36,34 +22,36 @@ def _join_words(words, language):
     return " ".join(parts)
 
 
-def _boundaries(data, word_count):
-    sentences = data.get("sentences") if isinstance(data, dict) else None
-    if not isinstance(sentences, list) or not sentences:
-        raise StageError("segment: LLM response must contain a non-empty sentences list")
+def _is_terminal(word):
+    return str(word["text"]).strip().endswith(SENTENCE_TERMINALS)
+
+
+def _rule_boundaries(words, pause_s, max_words, max_duration_s):
+    """Half-open [start, end) word-index boundaries covering every word once.
+
+    Cuts after a word when it ends a sentence (terminal punctuation), when
+    the next word starts after a silence longer than `pause_s`, or when the
+    running sentence would exceed `max_words` / `max_duration_s`. Best-effort
+    by design: imperfect boundaries are acceptable, gaps and overlaps are not.
+    """
     boundaries = []
-    expected = 0
-    for index, item in enumerate(sentences):
-        if not isinstance(item, dict):
-            raise StageError(f"segment: sentence {index} must be an object")
-        start = item.get("start")
-        end = item.get("end")
-        if (
-            isinstance(start, bool)
-            or isinstance(end, bool)
-            or not isinstance(start, int)
-            or not isinstance(end, int)
-        ):
-            raise StageError(f"segment: sentence {index} boundaries must be integers")
-        if start != expected:
-            raise StageError(
-                "segment: sentence boundaries must cover words without gaps or overlap"
-            )
-        if end <= start or end > word_count:
-            raise StageError(f"segment: sentence {index} has invalid boundary")
-        boundaries.append((start, end))
-        expected = end
-    if expected != word_count:
-        raise StageError("segment: sentence boundaries do not cover all words")
+    start = 0
+    for index in range(len(words)):
+        group_words = index - start + 1
+        duration = float(words[index]["end"]) - float(words[start]["start"])
+        last = index == len(words) - 1
+        cut = False
+        if last:
+            cut = True
+        elif _is_terminal(words[index]):
+            cut = True
+        elif float(words[index + 1]["start"]) - float(words[index]["end"]) > pause_s:
+            cut = True
+        elif group_words >= max_words or duration >= max_duration_s:
+            cut = True
+        if cut and group_words > 0:
+            boundaries.append((start, index + 1))
+            start = index + 1
     return boundaries
 
 
@@ -86,7 +74,11 @@ def _build_segments(transcript, boundaries, language):
         segment_end = float(group[-1]["end"])
         if segment_end <= segment_start:
             raise StageError(f"segment: sentence {index} has invalid timing")
-        if previous_end is not None and segment_start < previous_end - 0.001:
+        # Adjacent aligner words can overlap by a few ms (zero-duration
+        # clamps, boundary artifacts); best-effort segmentation tolerates
+        # that rather than failing the run, but anything larger is real
+        # disorder and still fails the contract.
+        if previous_end is not None and segment_start < previous_end - 0.05:
             raise StageError(f"segment: sentence {index} overlaps the previous sentence")
         previous_end = segment_end
         segments.append(
@@ -110,24 +102,21 @@ def _build_segments(transcript, boundaries, language):
 
 def run(ctx) -> None:
     transcript = ctx.read("transcript")
-    words = [
-        str(word["text"]).strip()
+    all_words = [
+        word
         for transcript_segment in transcript["segments"]
         for word in transcript_segment["words"]
     ]
-    if not words:
+    if not all_words:
         raise StageError("segment: transcript has no words")
 
-    client = create_llm_client(ctx.config, ctx.llm_fixture, ctx.llm_service)
-    request = {
-        "language": transcript["language"],
-        "words": [{"index": index, "text": text} for index, text in enumerate(words)],
-    }
-    try:
-        raw = client.complete(SYSTEM_PROMPT, json.dumps(request, ensure_ascii=False))
-    except LlmError as exc:
-        raise StageError(f"segment: LLM call failed: {exc}") from exc
-
-    boundaries = _boundaries(_parse_json(raw), len(words))
+    boundaries = _rule_boundaries(
+        all_words,
+        pause_s=float(ctx.config.get("segmentation.pause_s", DEFAULT_PAUSE_S)),
+        max_words=int(ctx.config.get("segmentation.max_words", DEFAULT_MAX_WORDS)),
+        max_duration_s=float(
+            ctx.config.get("segmentation.max_duration_s", DEFAULT_MAX_DURATION_S)
+        ),
+    )
     segments = _build_segments(transcript, boundaries, transcript["language"])
     ctx.write("segments", {"schema_version": 1, "segments": segments})
