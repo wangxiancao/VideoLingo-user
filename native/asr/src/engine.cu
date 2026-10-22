@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <fstream>
+#include <iostream>
 #include <cstring>
 #include <map>
 #include <sstream>
@@ -231,33 +232,108 @@ __global__ void rope_kernel(half* __restrict__ x, const float* __restrict__ cos_
   }
 }
 
-// Softmax over the scores of one query row (strided column in the col-major
-// score buffer): scores memory holds S(i, j) at [i + j * kFrames].
-__global__ void softmax_rows_kernel(half* __restrict__ scores, int heads) {
-  const int query = blockIdx.x;   // i
+
+
+// im2col for the conv frontend. conv1 gathers [chunk,t] rows of 384 taps
+// from mel [chunks,128,3000]; conv2 gathers [chunk,t] rows of 3840 taps from
+// the (t,c)-layout conv1 output. Boundary taps stay zero (padding 1).
+__global__ void im2col_conv1_kernel(const half* __restrict__ in, half* __restrict__ out,
+                                    int chunks) {
+  const int t = blockIdx.x * blockDim.x + threadIdx.x;   // 0..2999
+  const int index = blockIdx.y * blockDim.y + threadIdx.y;  // chunk*128 + cin
+  if (t >= kMelFrames || index >= chunks * kMelBins) return;
+  const int chunk = index / kMelBins;
+  const int cin = index % kMelBins;
+  half* row = out + (static_cast<size_t>(chunk) * kMelFrames + t) * (kMelBins * 3);
+  const half* src = in + static_cast<size_t>(chunk) * kMelBins * kMelFrames +
+                    static_cast<size_t>(cin) * kMelFrames;
+  row[cin * 3 + 0] = t >= 1 ? src[t - 1] : __float2half(0.0f);
+  row[cin * 3 + 1] = src[t];
+  row[cin * 3 + 2] = t + 1 < kMelFrames ? src[t + 1] : __float2half(0.0f);
+}
+
+__global__ void im2col_conv2_kernel(const half* __restrict__ in, half* __restrict__ out,
+                                    int chunks) {
+  const int t = blockIdx.x * blockDim.x + threadIdx.x;   // 0..1499
+  const int index = blockIdx.y * blockDim.y + threadIdx.y;  // chunk*1280 + cin
+  if (t >= kFrames || index >= chunks * kHidden) return;
+  const int chunk = index / kHidden;
+  const int cin = index % kHidden;
+  half* row = out + (static_cast<size_t>(chunk) * kFrames + t) * (kHidden * 3);
+  const half* src = in + static_cast<size_t>(chunk) * kMelFrames * kHidden;
+  for (int k = 0; k < 3; ++k) {
+    const int idx = 2 * t - 1 + k;
+    row[cin * 3 + k] =
+        (idx >= 0 && idx < kMelFrames)
+            ? src[static_cast<size_t>(idx) * kHidden + cin]
+            : __float2half(0.0f);
+  }
+}
+
+// Head-major re-layout: [chunks,1500,20,64] -> [chunks,20,1500,64] (and the
+// inverse for the attention output) so one uniform-stride batched GEMM covers
+// every (chunk, head) pair.
+__global__ void scatter_heads_kernel(const half* __restrict__ in, half* __restrict__ out,
+                                     int rows, int chunks) {
+  const size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const int hidden = kHeads * kHeadDim;
+  const size_t total = static_cast<size_t>(rows) * hidden;
+  if (i >= total) return;
+  const int col = static_cast<int>(i % hidden);
+  const int row = static_cast<int>(i / hidden);
+  const int head = col / kHeadDim;
+  const int dim = col % kHeadDim;
+  const int frames = rows / chunks;
+  const int chunk = row / frames;
+  const int frame = row % frames;
+  out[((static_cast<size_t>(chunk) * kHeads + head) * frames + frame) * kHeadDim + dim] =
+      in[i];
+}
+
+__global__ void gather_heads_kernel(const half* __restrict__ in, half* __restrict__ out,
+                                    int rows, int chunks) {
+  const size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const int hidden = kHeads * kHeadDim;
+  const size_t total = static_cast<size_t>(rows) * hidden;
+  if (i >= total) return;
+  const int col = static_cast<int>(i % hidden);
+  const int row = static_cast<int>(i / hidden);
+  const int head = col / kHeadDim;
+  const int dim = col % kHeadDim;
+  const int frames = rows / chunks;
+  const int chunk = row / frames;
+  const int frame = row % frames;
+  out[i] =
+      in[((static_cast<size_t>(chunk) * kHeads + head) * frames + frame) * kHeadDim + dim];
+}
+
+// Softmax over one contiguous query row of the row-major score buffer
+// S(i, j) at [head * L * L + i * L + j]; the scores GEMM computes S^T via
+// swapped q/k operands so each query row lands contiguous in memory.
+__global__ void softmax_rows_kernel(half* __restrict__ scores, int heads, int length) {
+  const int query = blockIdx.x;
   const int head = blockIdx.y;
-  if (query >= kFrames || head >= heads) return;
-  half* row = scores + static_cast<size_t>(head) * kFrames * kFrames;
+  if (query >= length || head >= heads) return;
+  half* row = scores + static_cast<size_t>(head) * length * length +
+              static_cast<size_t>(query) * length;
   __shared__ float shared[256];
-  const size_t base = static_cast<size_t>(query);
   float local_max = -1e30f;
-  for (int j = threadIdx.x; j < kFrames; j += blockDim.x)
-    local_max = fmaxf(local_max, __half2float(row[base + static_cast<size_t>(j) * kFrames]));
+  for (int j = threadIdx.x; j < length; j += blockDim.x)
+    local_max = fmaxf(local_max, __half2float(row[j]));
   shared[threadIdx.x] = local_max;
   __syncthreads();
   float maximum = -1e30f;
   for (int i = 0; i < blockDim.x; ++i) maximum = fmaxf(maximum, shared[i]);
   float local_sum = 0.0f;
-  for (int j = threadIdx.x; j < kFrames; j += blockDim.x)
-    local_sum += __expf(__half2float(row[base + static_cast<size_t>(j) * kFrames]) - maximum);
+  for (int j = threadIdx.x; j < length; j += blockDim.x)
+    local_sum += __expf(__half2float(row[j]) - maximum);
   shared[threadIdx.x] = local_sum;
   __syncthreads();
   float total = 0.0f;
   for (int i = 0; i < blockDim.x; ++i) total += shared[i];
   const float inv = 1.0f / total;
-  for (int j = threadIdx.x; j < kFrames; j += blockDim.x)
-    row[base + static_cast<size_t>(j) * kFrames] =
-        __float2half(__expf(__half2float(row[base + static_cast<size_t>(j) * kFrames]) - maximum) * inv);
+  for (int j = threadIdx.x; j < length; j += blockDim.x)
+    row[j] = __float2half(__expf(__half2float(row[j]) - maximum) * inv);
 }
 
 const float kOneF32 = 1.0f;
@@ -454,8 +530,8 @@ EncodeOutput run_encode(const std::vector<float>& mel_features, DeviceWeights* w
     // holds S(i, j) at [i + j * kFrames].
     CUBLAS_CHECK(cublasGemmStridedBatchedEx(
         cublas.get(), CUBLAS_OP_T, CUBLAS_OP_N, kFrames, kFrames, kHeadDim,
-        static_cast<const void*>(&attn_scale), d_q.get(), CUDA_R_16F, kHeads * kHeadDim,
-        kHeadDim, d_k.get(), CUDA_R_16F, kHeads * kHeadDim, kHeadDim,
+        static_cast<const void*>(&attn_scale), d_k.get(), CUDA_R_16F, kHeads * kHeadDim,
+        kHeadDim, d_q.get(), CUDA_R_16F, kHeads * kHeadDim, kHeadDim,
         static_cast<const void*>(&kZeroF32), d_scores.get(), CUDA_R_16F, kFrames,
         static_cast<long long>(kFrames) * kFrames, kHeads, CUBLAS_COMPUTE_32F,
         CUBLAS_GEMM_DEFAULT));
@@ -471,12 +547,12 @@ EncodeOutput run_encode(const std::vector<float>& mel_features, DeviceWeights* w
       CUDA_CHECK(cudaDeviceSynchronize());
       dump("dbg_scores_pre.f32", d_scores.get(), scores_count);
     }
-    softmax_rows_kernel<<<dim3(kFrames, kHeads), 256>>>(d_scores.get(), kHeads);
+    softmax_rows_kernel<<<dim3(kFrames, kHeads), 256>>>(d_scores.get(), kHeads, kFrames);
     CUDA_CHECK(cudaGetLastError());
 
     // attn[head] = softmax(S) * v_head, written back into the concat layout.
     CUBLAS_CHECK(cublasGemmStridedBatchedEx(
-        cublas.get(), CUBLAS_OP_N, CUBLAS_OP_T, kHeadDim, kFrames, kFrames,
+        cublas.get(), CUBLAS_OP_N, CUBLAS_OP_N, kHeadDim, kFrames, kFrames,
         static_cast<const void*>(&kOneF32), d_v.get(), CUDA_R_16F, kHeads * kHeadDim,
         kHeadDim, d_scores.get(), CUDA_R_16F, kFrames,
         static_cast<long long>(kFrames) * kFrames,
@@ -583,34 +659,101 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
   const size_t chunk_hidden = static_cast<size_t>(kFrames) * kHidden;
   const size_t score_count = static_cast<size_t>(kHeads) * kFrames * kFrames;
 
-  DeviceBuffer d_mel(mel_count * sizeof(half));
-  DeviceBuffer d_conv(static_cast<size_t>(chunks) * kHidden * kMelFrames * sizeof(half));
-  DeviceBuffer d_hidden(hidden_count * sizeof(half));
-  DeviceBuffer d_ln(hidden_count * sizeof(half));
-  DeviceBuffer d_q(hidden_count * sizeof(half));
-  DeviceBuffer d_k(hidden_count * sizeof(half));
-  DeviceBuffer d_v(hidden_count * sizeof(half));
-  DeviceBuffer d_attn(hidden_count * sizeof(half));
-  DeviceBuffer d_scratch(hidden_count * sizeof(half));
-  DeviceBuffer d_scores(score_count * sizeof(half));
-  DeviceBuffer d_mlp(mlp_count * sizeof(half));
-  DeviceBuffer d_proj(static_cast<size_t>(chunks) * kTokens * kProjMid * sizeof(half));
-  DeviceBuffer d_proj_out(static_cast<size_t>(chunks) * kTokens * kTextHidden * sizeof(half));
-  DeviceBuffer d_cos(build_rope_table(true).size() * sizeof(float));
-  DeviceBuffer d_sin(build_rope_table(false).size() * sizeof(float));
+  // Persistent workspace: sized once for the 8-chunk group ceiling and reused
+  // across calls so repeated groups do not pay cudaMalloc/free per invocation.
+  constexpr int kMaxGroup = 8;
+  struct Workspace {
+    DeviceBuffer mel, conv, hidden, ln, q, k, v, attn, scratch, scores, q_hm, k_hm, v_hm,
+        attn_hm, mlp, proj, proj_out, cos, sin, im2col_1, im2col_2;
+    bool ready = false;
+  };
+  static Workspace ws;
+  const size_t max_rows = static_cast<size_t>(kMaxGroup) * kFrames;
+  const size_t max_hidden = max_rows * kHidden;
+  if (!ws.ready) {
+    ws.mel = DeviceBuffer(static_cast<size_t>(kMaxGroup) * kMelBins * kMelFrames * sizeof(half));
+    ws.conv = DeviceBuffer(static_cast<size_t>(kMaxGroup) * kHidden * kMelFrames * sizeof(half));
+    ws.hidden = DeviceBuffer(max_hidden * sizeof(half));
+    ws.ln = DeviceBuffer(max_hidden * sizeof(half));
+    ws.q = DeviceBuffer(max_hidden * sizeof(half));
+    ws.k = DeviceBuffer(max_hidden * sizeof(half));
+    ws.v = DeviceBuffer(max_hidden * sizeof(half));
+    ws.attn = DeviceBuffer(max_hidden * sizeof(half));
+    ws.scratch = DeviceBuffer(max_hidden * sizeof(half));
+    ws.scores = DeviceBuffer(static_cast<size_t>(kMaxGroup) *
+                             static_cast<size_t>(kHeads) * kFrames * kFrames * sizeof(half));
+    ws.q_hm = DeviceBuffer(max_hidden * sizeof(half));
+    ws.k_hm = DeviceBuffer(max_hidden * sizeof(half));
+    ws.v_hm = DeviceBuffer(max_hidden * sizeof(half));
+    ws.attn_hm = DeviceBuffer(max_hidden * sizeof(half));
+    ws.mlp = DeviceBuffer(static_cast<size_t>(kMaxGroup) * kFrames * kIntermediate * sizeof(half));
+    ws.proj = DeviceBuffer(static_cast<size_t>(kMaxGroup) * kTokens * kProjMid * sizeof(half));
+    ws.im2col_1 = DeviceBuffer(static_cast<size_t>(kMaxGroup) * kMelFrames * kMelBins * 3 *
+                               sizeof(half));
+    ws.im2col_2 =
+        DeviceBuffer(static_cast<size_t>(kMaxGroup) * kFrames * kHidden * 3 * sizeof(half));
+    ws.proj_out =
+        DeviceBuffer(static_cast<size_t>(kMaxGroup) * kTokens * kTextHidden * sizeof(half));
+    ws.cos = DeviceBuffer(build_rope_table(true).size() * sizeof(float));
+    ws.sin = DeviceBuffer(build_rope_table(false).size() * sizeof(float));
+    const std::vector<float> cos_t = build_rope_table(true);
+    const std::vector<float> sin_t = build_rope_table(false);
+    CUDA_CHECK(cudaMemcpy(ws.cos.get(), cos_t.data(), cos_t.size() * sizeof(float),
+                          cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(ws.sin.get(), sin_t.data(), sin_t.size() * sizeof(float),
+                          cudaMemcpyHostToDevice));
+    ws.ready = true;
+  }
+  DeviceBuffer& d_mel = ws.mel;
+  DeviceBuffer& d_conv = ws.conv;
+  DeviceBuffer& d_hidden = ws.hidden;
+  DeviceBuffer& d_ln = ws.ln;
+  DeviceBuffer& d_q = ws.q;
+  DeviceBuffer& d_k = ws.k;
+  DeviceBuffer& d_v = ws.v;
+  DeviceBuffer& d_attn = ws.attn;
+  DeviceBuffer& d_scratch = ws.scratch;
+  DeviceBuffer& d_scores = ws.scores;
+  DeviceBuffer& d_q_hm = ws.q_hm;
+  DeviceBuffer& d_k_hm = ws.k_hm;
+  DeviceBuffer& d_v_hm = ws.v_hm;
+  DeviceBuffer& d_attn_hm = ws.attn_hm;
+  DeviceBuffer& d_mlp = ws.mlp;
+  DeviceBuffer& d_proj = ws.proj;
+  DeviceBuffer& d_proj_out = ws.proj_out;
+  DeviceBuffer& d_cos = ws.cos;
+  DeviceBuffer& d_sin = ws.sin;
+  DeviceBuffer& d_im2col_1 = ws.im2col_1;
+  DeviceBuffer& d_im2col_2 = ws.im2col_2;
   {
     std::vector<half> host(mel_count);
     for (size_t i = 0; i < mel_count; ++i) host[i] = __float2half(mel_features[i]);
     CUDA_CHECK(cudaMemcpy(d_mel.get(), host.data(), mel_count * sizeof(half),
                           cudaMemcpyHostToDevice));
-    const std::vector<float> cos_t = build_rope_table(true);
-    const std::vector<float> sin_t = build_rope_table(false);
-    CUDA_CHECK(cudaMemcpy(d_cos.get(), cos_t.data(), cos_t.size() * sizeof(float),
-                          cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_sin.get(), sin_t.data(), sin_t.size() * sizeof(float),
-                          cudaMemcpyHostToDevice));
   }
 
+  const bool stage_timing = getenv("M2_STAGE_TIMING") != nullptr;
+  float t_gemm = 0, t_attn = 0, t_elt = 0, t_cpy = 0;
+  cudaEvent_t ev_a, ev_b;
+  if (stage_timing) {
+    cudaEventCreate(&ev_a);
+    cudaEventCreate(&ev_b);
+  }
+  const auto tick = [&]() { if (stage_timing) cudaEventRecord(ev_a); };
+  const auto tock = [&](float& bucket) {
+    if (stage_timing) {
+      cudaEventRecord(ev_b);
+      cudaEventSynchronize(ev_b);
+      float ms = 0;
+      cudaEventElapsedTime(&ms, ev_a, ev_b);
+      bucket += ms;
+    }
+  };
+  struct StageTimings {
+    bool on = false;
+    float gemm = 0, attn = 0, elt = 0, cpy = 0;
+  } st;
+  st.on = stage_timing;
   const auto weight = [&](const std::string& name) -> const half* {
     const DeviceWeights::Entry* entry = weights->find(name);
     if (!entry) throw ExecutionError("missing resident tensor: " + name);
@@ -638,31 +781,51 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
   };
 
   {
-    const dim3 threads(16, 16, 1);
-    const dim3 blocks1((kHidden + 15) / 16, (kMelFrames + 15) / 16, chunks);
-    conv1_gelu_kernel<<<blocks1, threads>>>(d_mel.get(), weight("audio_tower.conv1.weight"),
-                                            weight("audio_tower.conv1.bias"), d_conv.get(),
-                                            kMelBins, kMelFrames, chunks);
-    CUDA_CHECK(cudaGetLastError());
-    const dim3 blocks2((kHidden + 15) / 16, (kFrames + 15) / 16, chunks);
-    conv2_gelu_kernel<<<blocks2, threads>>>(d_conv.get(), weight("audio_tower.conv2.weight"),
-                                            weight("audio_tower.conv2.bias"), d_hidden.get(),
-                                            kHidden, kMelFrames, chunks);
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
-    out.conv_hidden.resize(chunk_hidden);
-    to_host_float(d_hidden.get(), chunk_hidden, out.conv_hidden.data());
+    // Conv frontend via im2col + cuBLAS GEMM: the (t,c) GEMM output layout is
+    // exactly what conv2's gather expects and what the encoder hidden needs.
+    {
+      const dim3 threads(16, 16);
+      im2col_conv1_kernel<<<dim3((kMelFrames + 15) / 16, (chunks * kMelBins + 15) / 16),
+                            threads>>>(d_mel.get(), d_im2col_1.get(), chunks);
+      CUDA_CHECK(cudaGetLastError());
+      linear_rows(weight("audio_tower.conv1.weight"), weight("audio_tower.conv1.bias"),
+                  d_im2col_1.get(), d_conv.get(), chunks * kMelFrames, kHidden,
+                  kMelBins * 3);
+      const size_t conv1_count = static_cast<size_t>(chunks) * kMelFrames * kHidden;
+      gelu_kernel<<<static_cast<unsigned>((conv1_count + 255) / 256), 256>>>(
+          d_conv.get(), conv1_count);
+      CUDA_CHECK(cudaGetLastError());
+      im2col_conv2_kernel<<<dim3((kFrames + 15) / 16, (chunks * kHidden + 15) / 16), threads>>>(
+          d_conv.get(), d_im2col_2.get(), chunks);
+      CUDA_CHECK(cudaGetLastError());
+      linear_rows(weight("audio_tower.conv2.weight"), weight("audio_tower.conv2.bias"),
+                  d_im2col_2.get(), d_hidden.get(), chunks * kFrames, kHidden, kHidden * 3);
+      const size_t conv2_count = static_cast<size_t>(chunks) * kFrames * kHidden;
+      gelu_kernel<<<static_cast<unsigned>((conv2_count + 255) / 256), 256>>>(
+          d_hidden.get(), conv2_count);
+      CUDA_CHECK(cudaGetLastError());
+      CUDA_CHECK(cudaDeviceSynchronize());
+    }
+    if (options.dump_stages) {
+      out.conv_hidden.resize(chunk_hidden);
+      to_host_float(d_hidden.get(), chunk_hidden, out.conv_hidden.data());
+    }
   }
 
   const float attn_scale = 1.0f / std::sqrt(static_cast<float>(kHeadDim));
   for (int layer = 0; layer < kLayers; ++layer) {
     const std::string prefix = "audio_tower.layers." + std::to_string(layer) + ".";
+    tick();
     CUDA_CHECK(cudaMemcpy(d_ln.get(), d_hidden.get(), hidden_count * sizeof(half),
                           cudaMemcpyDeviceToDevice));
+    tock(t_cpy);
+    tick();
     layer_norm_kernel<<<rows, 256, 2 * 256 * sizeof(float)>>>(
         d_ln.get(), weight(prefix + "input_layernorm.weight"),
         weight(prefix + "input_layernorm.bias"), rows, kHidden);
     CUDA_CHECK(cudaGetLastError());
+    tock(t_elt);
+    tick();
     linear_rows(weight(prefix + "self_attn.q_proj.weight"),
                 weight(prefix + "self_attn.q_proj.bias"), d_ln.get(), d_q.get(), rows, kHidden,
                 kHidden);
@@ -671,7 +834,9 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
     linear_rows(weight(prefix + "self_attn.v_proj.weight"),
                 weight(prefix + "self_attn.v_proj.bias"), d_ln.get(), d_v.get(), rows, kHidden,
                 kHidden);
+    tock(t_gemm);
     {
+      tick();
       const dim3 blocks((kRotaryDim / 2 + 63) / 64, rows);
       rope_kernel<<<blocks, 64>>>(d_q.get(), reinterpret_cast<const float*>(d_cos.get()),
                                   reinterpret_cast<const float*>(d_sin.get()), rows, kFrames);
@@ -679,34 +844,52 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
       rope_kernel<<<blocks, 64>>>(d_k.get(), reinterpret_cast<const float*>(d_cos.get()),
                                   reinterpret_cast<const float*>(d_sin.get()), rows, kFrames);
       CUDA_CHECK(cudaGetLastError());
+      tock(t_elt);
     }
-    for (int chunk = 0; chunk < chunks; ++chunk) {
-      const half* q_c = d_q.get() + static_cast<size_t>(chunk) * chunk_hidden;
-      const half* k_c = d_k.get() + static_cast<size_t>(chunk) * chunk_hidden;
-      const half* v_c = d_v.get() + static_cast<size_t>(chunk) * chunk_hidden;
-      half* attn_c = d_attn.get() + static_cast<size_t>(chunk) * chunk_hidden;
+    tick();
+    {
+      // head-major re-layout, then ONE uniform-stride batched call per stage
+      // across every (chunk, head) pair in the group.
+      const size_t total = hidden_count;
+      scatter_heads_kernel<<<static_cast<unsigned>((total + 255) / 256), 256>>>(
+          d_q.get(), d_q_hm.get(), rows, chunks);
+      scatter_heads_kernel<<<static_cast<unsigned>((total + 255) / 256), 256>>>(
+          d_k.get(), d_k_hm.get(), rows, chunks);
+      scatter_heads_kernel<<<static_cast<unsigned>((total + 255) / 256), 256>>>(
+          d_v.get(), d_v_hm.get(), rows, chunks);
+      CUDA_CHECK(cudaGetLastError());
+      const int batch = chunks * kHeads;
+      const long long head_stride = static_cast<long long>(kFrames) * kHeadDim;
+      const long long score_stride = static_cast<long long>(kFrames) * kFrames;
       CUBLAS_CHECK(cublasGemmStridedBatchedEx(
           cublas.get(), CUBLAS_OP_T, CUBLAS_OP_N, kFrames, kFrames, kHeadDim,
-          static_cast<const void*>(&attn_scale), q_c, CUDA_R_16F, kHeads * kHeadDim,
-          kHeadDim, k_c, CUDA_R_16F, kHeads * kHeadDim, kHeadDim,
+          static_cast<const void*>(&attn_scale), d_k_hm.get(), CUDA_R_16F, kHeadDim,
+          head_stride, d_q_hm.get(), CUDA_R_16F, kHeadDim, head_stride,
           static_cast<const void*>(&kZeroF32), d_scores.get(), CUDA_R_16F, kFrames,
-          static_cast<long long>(kFrames) * kFrames, kHeads, CUBLAS_COMPUTE_32F,
-          CUBLAS_GEMM_DEFAULT));
-      softmax_rows_kernel<<<dim3(kFrames, kHeads), 256>>>(d_scores.get(), kHeads);
+          score_stride, batch, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
+      softmax_rows_kernel<<<dim3(kFrames, batch), 256>>>(d_scores.get(), batch, kFrames);
       CUDA_CHECK(cudaGetLastError());
       CUBLAS_CHECK(cublasGemmStridedBatchedEx(
-          cublas.get(), CUBLAS_OP_N, CUBLAS_OP_T, kHeadDim, kFrames, kFrames,
-          static_cast<const void*>(&kOneF32), v_c, CUDA_R_16F, kHeads * kHeadDim,
-          kHeadDim, d_scores.get(), CUDA_R_16F, kFrames,
-          static_cast<long long>(kFrames) * kFrames, static_cast<const void*>(&kZeroHalf),
-          attn_c, CUDA_R_16F, kHeads * kHeadDim, kHeadDim, kHeads, CUBLAS_COMPUTE_32F,
-          CUBLAS_GEMM_DEFAULT));
+          cublas.get(), CUBLAS_OP_N, CUBLAS_OP_N, kHeadDim, kFrames, kFrames,
+          static_cast<const void*>(&kOneF32), d_v_hm.get(), CUDA_R_16F, kHeadDim,
+          head_stride, d_scores.get(), CUDA_R_16F, kFrames, score_stride,
+          static_cast<const void*>(&kZeroHalf), d_attn_hm.get(), CUDA_R_16F, kHeadDim,
+          head_stride, batch, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
+      gather_heads_kernel<<<static_cast<unsigned>((total + 255) / 256), 256>>>(
+          d_attn_hm.get(), d_attn.get(), rows, chunks);
+      CUDA_CHECK(cudaGetLastError());
     }
+    tock(t_attn);
+    tick();
     linear_rows(weight(prefix + "self_attn.o_proj.weight"),
                 weight(prefix + "self_attn.o_proj.bias"), d_attn.get(), d_scratch.get(), rows,
                 kHidden, kHidden);
+    tock(t_gemm);
+    tick();
     CUDA_CHECK(cudaMemcpy(d_attn.get(), d_scratch.get(), hidden_count * sizeof(half),
                           cudaMemcpyDeviceToDevice));
+    tock(t_cpy);
+    tick();
     residual_add_kernel<<<static_cast<unsigned>((hidden_count + 255) / 256), 256>>>(
         d_hidden.get(), d_attn.get(), hidden_count);
     CUDA_CHECK(cudaGetLastError());
@@ -716,28 +899,41 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
         d_ln.get(), weight(prefix + "post_attention_layernorm.weight"),
         weight(prefix + "post_attention_layernorm.bias"), rows, kHidden);
     CUDA_CHECK(cudaGetLastError());
+    tock(t_elt);
+    tick();
     linear_rows(weight(prefix + "mlp.fc1.weight"), weight(prefix + "mlp.fc1.bias"), d_ln.get(),
                 d_mlp.get(), rows, kIntermediate, kHidden);
+    tock(t_gemm);
+    tick();
     gelu_kernel<<<static_cast<unsigned>((mlp_count + 255) / 256), 256>>>(d_mlp.get(),
                                                                          mlp_count);
     CUDA_CHECK(cudaGetLastError());
+    tock(t_elt);
+    tick();
     linear_rows(weight(prefix + "mlp.fc2.weight"), weight(prefix + "mlp.fc2.bias"),
                 d_mlp.get(), d_attn.get(), rows, kHidden, kIntermediate);
+    tock(t_gemm);
+    tick();
     residual_add_kernel<<<static_cast<unsigned>((hidden_count + 255) / 256), 256>>>(
         d_hidden.get(), d_attn.get(), hidden_count);
     CUDA_CHECK(cudaGetLastError());
+    tock(t_elt);
 
-    out.layer_hidden.resize(chunk_hidden * (layer + 1));
-    to_host_float(d_hidden.get(), chunk_hidden,
-                  out.layer_hidden.data() + chunk_hidden * layer);
+    if (options.dump_stages) {
+      out.layer_hidden.resize(chunk_hidden * (layer + 1));
+      to_host_float(d_hidden.get(), chunk_hidden,
+                    out.layer_hidden.data() + chunk_hidden * layer);
+    }
   }
 
   layer_norm_kernel<<<rows, 256, 2 * 256 * sizeof(float)>>>(
       d_hidden.get(), weight("audio_tower.norm.weight"), weight("audio_tower.norm.bias"), rows,
       kHidden);
   CUDA_CHECK(cudaGetLastError());
-  out.final_norm.resize(chunk_hidden);
-  to_host_float(d_hidden.get(), chunk_hidden, out.final_norm.data());
+  if (options.dump_stages) {
+    out.final_norm.resize(chunk_hidden);
+    to_host_float(d_hidden.get(), chunk_hidden, out.final_norm.data());
+  }
 
   linear_rows(weight("multi_modal_projector.linear_1.weight"),
               weight("multi_modal_projector.linear_1.bias"), d_hidden.get(), d_proj.get(),
@@ -754,9 +950,15 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
                           static_cast<size_t>(chunks) * kTokens * kTextHidden * sizeof(half),
                           cudaMemcpyDeviceToDevice));
   }
-  out.projector.resize(static_cast<size_t>(kTokens) * kTextHidden);
-  to_host_float(d_proj_out.get(), static_cast<size_t>(kTokens) * kTextHidden,
-                out.projector.data());
+  if (options.dump_stages) {
+    out.projector.resize(static_cast<size_t>(kTokens) * kTextHidden);
+    to_host_float(d_proj_out.get(), static_cast<size_t>(kTokens) * kTextHidden,
+                  out.projector.data());
+  }
   CUDA_CHECK(cudaDeviceSynchronize());
+  if (stage_timing)
+    std::cerr << "stage_timing chunks=" << chunks << " gemm_ms=" << t_gemm
+              << " attn_ms=" << t_attn << " elt_ms=" << t_elt << " cpy_ms=" << t_cpy
+              << " (sum " << (t_gemm + t_attn + t_elt + t_cpy) << ")\n";
   return out;
 }

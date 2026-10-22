@@ -303,43 +303,44 @@ __global__ void rope_rows_kernel(half* __restrict__ q, half* __restrict__ k,
   }
 }
 
-// Causal mask on the col-major score buffer S(i, j) at [i + j*L]: j > i -> -inf.
+// Causal mask on the row-major score buffer S(i, j) at [i*L + j]: j > i -> -inf.
 __global__ void causal_mask_kernel(half* __restrict__ scores, int heads, int length) {
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
   const int j = blockIdx.y * blockDim.y + threadIdx.y;
   if (i >= length || j >= length) return;
   if (j > i) {
     for (int h = 0; h < heads; ++h)
-      scores[static_cast<size_t>(h) * length * length + i +
-             static_cast<size_t>(j) * length] = __float2half(-65504.0f);
+      scores[static_cast<size_t>(h) * length * length + static_cast<size_t>(i) * length +
+             j] = __float2half(-65504.0f);
   }
 }
 
-// Row softmax over the col-major score buffer (one query row per block).
+// Row softmax over the contiguous query rows of the row-major score buffer
+// S(i, j) at [head * L * L + i * L + j].
 __global__ void softmax_rows_kernel(half* __restrict__ scores, int heads, int length) {
   const int query = blockIdx.x;
   const int head = blockIdx.y;
   if (query >= length || head >= heads) return;
-  half* base = scores + static_cast<size_t>(head) * length * length;
+  half* row = scores + static_cast<size_t>(head) * length * length +
+              static_cast<size_t>(query) * length;
   __shared__ float shared[256];
   float local_max = -1e30f;
   for (int j = threadIdx.x; j < length; j += blockDim.x)
-    local_max = fmaxf(local_max, __half2float(base[query + static_cast<size_t>(j) * length]));
+    local_max = fmaxf(local_max, __half2float(row[j]));
   shared[threadIdx.x] = local_max;
   __syncthreads();
   float maximum = -1e30f;
   for (int i = 0; i < blockDim.x; ++i) maximum = fmaxf(maximum, shared[i]);
   float local_sum = 0.0f;
   for (int j = threadIdx.x; j < length; j += blockDim.x)
-    local_sum += __expf(__half2float(base[query + static_cast<size_t>(j) * length]) - maximum);
+    local_sum += __expf(__half2float(row[j]) - maximum);
   shared[threadIdx.x] = local_sum;
   __syncthreads();
   float total = 0.0f;
   for (int i = 0; i < blockDim.x; ++i) total += shared[i];
   const float inv = 1.0f / total;
   for (int j = threadIdx.x; j < length; j += blockDim.x)
-    base[query + static_cast<size_t>(j) * length] =
-        __float2half(__expf(__half2float(base[query + static_cast<size_t>(j) * length]) - maximum) * inv);
+    row[j] = __float2half(__expf(__half2float(row[j]) - maximum) * inv);
 }
 
 // Appends one k/v row per chunk into each chunk's own cache at `start`.
@@ -696,9 +697,9 @@ DecodeResult run_decode(DeviceWeights* weights, const uint16_t* audio_embeds_raw
           const half* k_group = k_seq + static_cast<size_t>(group) * kTextHeadDim;
           CUBLAS_THROW(cublasGemmStridedBatchedEx(
               cublas, CUBLAS_OP_T, CUBLAS_OP_N, length, length, kTextHeadDim,
-              static_cast<const void*>(&attn_scale), q_group, CUDA_R_16F, kTextHidden,
-              kTextHeadDim, k_group, CUDA_R_16F, static_cast<int>(kv_width), 0,
-              static_cast<const void*>(&zero32),
+              static_cast<const void*>(&attn_scale), k_group, CUDA_R_16F,
+              static_cast<int>(kv_width), 0, q_group, CUDA_R_16F, kTextHidden,
+              kTextHeadDim, static_cast<const void*>(&zero32),
               scores + static_cast<size_t>(group) * heads_per_group * prompt_length * prompt_length,
               CUDA_R_16F, length, static_cast<long long>(prompt_length) * prompt_length,
               heads_per_group, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
@@ -716,7 +717,7 @@ DecodeResult run_decode(DeviceWeights* weights, const uint16_t* audio_embeds_raw
           const int heads_per_group = kTextHeads / kTextKvHeads;
           const half* v_group = v_seq + static_cast<size_t>(group) * kTextHeadDim;
           CUBLAS_THROW(cublasGemmStridedBatchedEx(
-              cublas, CUBLAS_OP_N, CUBLAS_OP_T, kTextHeadDim, length, length,
+              cublas, CUBLAS_OP_N, CUBLAS_OP_N, kTextHeadDim, length, length,
               static_cast<const void*>(&one32), v_group, CUDA_R_16F,
               static_cast<int>(kv_width), 0,
               scores + static_cast<size_t>(group) * heads_per_group * prompt_length * prompt_length,
@@ -1001,9 +1002,10 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
           CUBLAS_THROW(cublasGemmStridedBatchedEx(
               cublas, CUBLAS_OP_T, CUBLAS_OP_N, L, L, kTextHeadDim,
               static_cast<const void*>(&attn_scale),
+              k_c + static_cast<size_t>(grp) * kTextHeadDim, CUDA_R_16F,
+              static_cast<int>(kv_width), 0,
               q_c + static_cast<size_t>(grp) * per * kTextHeadDim, CUDA_R_16F, kTextHidden,
-              kTextHeadDim, k_c + static_cast<size_t>(grp) * kTextHeadDim, CUDA_R_16F,
-              static_cast<int>(kv_width), 0, static_cast<const void*>(&zero32),
+              kTextHeadDim, static_cast<const void*>(&zero32),
               d_scores + static_cast<size_t>(grp) * per * prompt_length * prompt_length,
               CUDA_R_16F, L, static_cast<long long>(prompt_length) * prompt_length, per,
               CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
@@ -1016,7 +1018,7 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
         for (int grp = 0; grp < kTextHeads / kTextKvHeads; ++grp) {
           const int per = kTextHeads / kTextKvHeads;
           CUBLAS_THROW(cublasGemmStridedBatchedEx(
-              cublas, CUBLAS_OP_N, CUBLAS_OP_T, kTextHeadDim, L, L,
+              cublas, CUBLAS_OP_N, CUBLAS_OP_N, kTextHeadDim, L, L,
               static_cast<const void*>(&one32), v_c + static_cast<size_t>(grp) * kTextHeadDim,
               CUDA_R_16F, static_cast<int>(kv_width), 0,
               d_scores + static_cast<size_t>(grp) * per * prompt_length * prompt_length,

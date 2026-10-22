@@ -56,6 +56,7 @@ struct EncodeOutput {
 
 struct EncodeOptions {
   bool fp16_accumulate = true;  // projection GEMM accumulation mode
+  bool dump_stages = false;     // host-side stage dumps for gating (off for timing)
   uint64_t max_vram_bytes = 16384ull * 1024 * 1024;
 };
 

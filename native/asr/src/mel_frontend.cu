@@ -101,6 +101,57 @@ void build_windowed_trig_tables(std::vector<float>* wcos, std::vector<float>* ws
   }
 }
 
+
+// Per-chunk log/normalize on device. Stage A: log10 + per-(chunk,bin) max;
+// stage B: chunk-level max reduction; stage C: clamp to chunk max - 8 and
+// (x+4)/4, dropping the last frame.
+__global__ void mel_log_max_kernel(const float* __restrict__ mel,
+                                   float* __restrict__ logs, float* __restrict__ bin_max,
+                                   int chunks) {
+  const int chunk = blockIdx.z;
+  const int bin = blockIdx.y;
+  const int tid = threadIdx.x;
+  if (chunk >= chunks || bin >= kMelBins) return;
+  const float* src = mel + (static_cast<size_t>(chunk) * kMelBins + bin) * kFrameCount;
+  float* dst = logs + (static_cast<size_t>(chunk) * kMelBins + bin) * kOutputFrames;
+  __shared__ float s_max[256];
+  float local_max = -1e30f;
+  for (int f = tid; f < kOutputFrames; f += blockDim.x) {
+    const float v = log10f(fmaxf(src[f], 1e-10f));
+    dst[f] = v;
+    local_max = fmaxf(local_max, v);
+  }
+  s_max[tid] = local_max;
+  __syncthreads();
+  float maximum = -1e30f;
+  for (int i = 0; i < blockDim.x; ++i) maximum = fmaxf(maximum, s_max[i]);
+  if (tid == 0) bin_max[chunk * kMelBins + bin] = maximum;
+}
+
+__global__ void mel_chunk_max_kernel(const float* __restrict__ bin_max,
+                                     float* __restrict__ chunk_max, int chunks) {
+  const int chunk = blockIdx.x;
+  if (chunk >= chunks) return;
+  float maximum = -1e30f;
+  for (int b = 0; b < kMelBins; ++b)
+    maximum = fmaxf(maximum, bin_max[chunk * kMelBins + b]);
+  chunk_max[chunk] = maximum;
+}
+
+__global__ void mel_normalize_kernel(const float* __restrict__ logs,
+                                     const float* __restrict__ chunk_max,
+                                     float* __restrict__ out, int chunks) {
+  const int chunk = blockIdx.z;
+  const int bin = blockIdx.y;
+  const int tid = threadIdx.x;
+  if (chunk >= chunks || bin >= kMelBins) return;
+  const float* src = logs + (static_cast<size_t>(chunk) * kMelBins + bin) * kOutputFrames;
+  float* dst = out + (static_cast<size_t>(chunk) * kMelBins + bin) * kOutputFrames;
+  const float floor_log = chunk_max[chunk] - 8.0f;
+  for (int f = tid; f < kOutputFrames; f += blockDim.x)
+    dst[f] = (fmaxf(src[f], floor_log) + 4.0f) / 4.0f;
+}
+
 // np.pad(x, (200, 200), mode="reflect") indexing: j < 0 -> x[-j], j >= N -> x[2N-2-j].
 __device__ int reflect_index(int j, int n) {
   if (j < 0) return -j;
@@ -171,6 +222,9 @@ MelOutput compute_mel_batched(const std::vector<float>& pcm, int chunks) {
 
   const size_t power_total = power_count * chunks;
   const size_t mel_total = mel_count * chunks;
+  const size_t out_count = static_cast<size_t>(kMelBins) * kOutputFrames;
+  MelOutput out;
+  out.input_samples = kChunkSamples;
   float* d_pcm = nullptr;
   float* d_wcos = nullptr;
   float* d_wsin = nullptr;
@@ -201,7 +255,30 @@ MelOutput compute_mel_batched(const std::vector<float>& pcm, int chunks) {
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    CUDA_CHECK(cudaMemcpy(mel_gpu.data(), d_mel, mel_total * sizeof(float), cudaMemcpyDeviceToHost));
+    float* d_out = nullptr;
+    float* d_logs = nullptr;
+    float* d_bin_max = nullptr;
+    float* d_chunk_max = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_out, out_count * chunks * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_logs, out_count * chunks * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_bin_max, static_cast<size_t>(chunks) * kMelBins * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_chunk_max, static_cast<size_t>(chunks) * sizeof(float)));
+    mel_log_max_kernel<<<dim3(1, kMelBins, chunks), 256>>>(d_mel, d_logs, d_bin_max, chunks);
+    CUDA_CHECK(cudaGetLastError());
+    mel_chunk_max_kernel<<<chunks, 1>>>(d_bin_max, d_chunk_max, chunks);
+    CUDA_CHECK(cudaGetLastError());
+    mel_normalize_kernel<<<dim3(1, kMelBins, chunks), 256>>>(d_logs, d_chunk_max, d_out,
+                                                             chunks);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+    cudaFree(d_logs); cudaFree(d_bin_max); cudaFree(d_chunk_max);
+    out.features.resize(out_count * chunks);
+    CUDA_CHECK(cudaMemcpy(out.features.data(), d_out, out_count * chunks * sizeof(float),
+                          cudaMemcpyDeviceToHost));
+    cudaFree(d_out);
+    cudaFree(d_pcm); cudaFree(d_wcos); cudaFree(d_wsin);
+    cudaFree(d_power); cudaFree(d_filters); cudaFree(d_mel);
+    return out;
   } catch (...) {
     cudaFree(d_pcm); cudaFree(d_wcos); cudaFree(d_wsin);
     cudaFree(d_power); cudaFree(d_filters); cudaFree(d_mel);
@@ -210,28 +287,5 @@ MelOutput compute_mel_batched(const std::vector<float>& pcm, int chunks) {
   cudaFree(d_pcm); cudaFree(d_wcos); cudaFree(d_wsin);
   cudaFree(d_power); cudaFree(d_filters); cudaFree(d_mel);
 
-  // Post-processing on the host in double precision, mirroring the reference:
-  // floor -> log10 -> drop last frame -> clamp to per-chunk max - 8 -> (x+4)/4.
-  MelOutput out;
-  out.input_samples = kChunkSamples;
-  const size_t out_count = static_cast<size_t>(kMelBins) * kOutputFrames;
-  out.features.resize(out_count * chunks);
-  std::vector<double> log_spec(static_cast<size_t>(kMelBins) * kOutputFrames);
-  for (int chunk = 0; chunk < chunks; ++chunk) {
-    const float* src = mel_gpu.data() + static_cast<size_t>(chunk) * mel_count;
-    float* dst = out.features.data() + static_cast<size_t>(chunk) * out_count;
-    double global_max = -std::numeric_limits<double>::infinity();
-    for (int m = 0; m < kMelBins; ++m)
-      for (int f = 0; f < kOutputFrames; ++f) {
-        const double value =
-            std::max(1e-10, static_cast<double>(src[static_cast<size_t>(m) * kFrameCount + f]));
-        const double logged = std::log10(value);
-        log_spec[static_cast<size_t>(m) * kOutputFrames + f] = logged;
-        global_max = std::max(global_max, logged);
-      }
-    const double floor_log = global_max - 8.0;
-    for (size_t i = 0; i < log_spec.size(); ++i)
-      dst[i] = static_cast<float>((std::max(log_spec[i], floor_log) + 4.0) / 4.0);
-  }
   return out;
 }

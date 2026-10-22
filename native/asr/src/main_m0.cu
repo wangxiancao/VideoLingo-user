@@ -265,6 +265,7 @@ int run_encode(int argc, char** argv) {
 
   EncodeOptions options;
   options.fp16_accumulate = fp16_accumulate;
+  options.dump_stages = true;
   const EncodeOutput encoded =
       chunks == 1 ? run_encode(mel.features, &weights, options)
                   : run_encode_batched(mel.features, chunks, &weights, options, nullptr);

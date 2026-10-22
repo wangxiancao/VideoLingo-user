@@ -853,10 +853,16 @@ DeviceWeights load_weights_resident(const std::string& model_dir, uint64_t max_v
   DeviceWeights weights;
   uint16_t* arena = nullptr;
   uint16_t* staging = nullptr;
+  // cuBLAS GEMM paths degrade badly on under-aligned matrices; give every
+  // tensor a 256-byte aligned offset inside the arena (padding is bounded by
+  // 745 * 128 elements ~ 0.9 MB).
+  const uint64_t align_elements = 128;  // 256 bytes / sizeof(half)
+  const uint64_t arena_elements =
+      inventory.fp16_bytes / 2 + (tensors.size() + 1) * align_elements;
   try {
-    CUDA_CHECK(cudaMalloc(&arena, inventory.fp16_bytes));
+    CUDA_CHECK(cudaMalloc(&arena, arena_elements * 2));
     CUDA_CHECK(cudaMalloc(&staging, largest_bf16));
-    uint64_t cursor = 0;
+    uint64_t cursor = align_elements;  // keep the base itself aligned too
     for (const TensorSpec& t : tensors) {
       const std::vector<uint8_t> bf16 = checkpoint.read(t.begin, t.nbytes());
       const uint64_t count = t.element_count();
@@ -868,6 +874,7 @@ DeviceWeights load_weights_resident(const std::string& model_dir, uint64_t max_v
       CUDA_CHECK(cudaGetLastError());
       CUDA_CHECK(cudaDeviceSynchronize());
 
+      cursor = (cursor + align_elements - 1) / align_elements * align_elements;
       DeviceWeights::Entry entry;
       entry.ptr = arena + cursor;
       entry.shape = t.shape;
@@ -876,7 +883,7 @@ DeviceWeights load_weights_resident(const std::string& model_dir, uint64_t max_v
       cursor += count;
     }
     weights.arena_ = arena;
-    weights.bytes_ = inventory.fp16_bytes;
+    weights.bytes_ = arena_elements * 2;
     cudaFree(staging);
   } catch (...) {
     if (staging) cudaFree(staging);
