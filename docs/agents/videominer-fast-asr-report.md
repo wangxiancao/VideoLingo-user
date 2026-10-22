@@ -1,5 +1,7 @@
 # VideoMiner「快速转录引擎」容器取证报告
 
+> 重建说明（2026-10-23）：原件经 2026-10-22 核实从未提交；本文从 wayfinder 地图 #33 与取证票评论重建，随 a70ede7 落盘，非原件。取证素材 `/tmp/videominer-inspect` 与脚本归档 `bench/results/fp16-probe/scripts/` 仍在，可交叉核验（#43）。
+
 - 取证对象：`videominer-inspect-20261022`（镜像 `jaceju68/video-miner:cuda-latest`，retag 自 `docker.1ms.run/jaceju68/video-miner:cuda-latest`）
 - 取证方式：只读 `docker inspect/exec/cp` + 宿主机 `file/ldd/readelf/nm/objdump/strings`；未启动应用、未下载权重、未跑任何推理、未改动容器与 `/root/VideoLingo`。
 - 标注约定：**【观察】** 为命令/文件直接可见；**【推断】** 为由符号、反汇编、配置和文档推导，未做运行时验证。
