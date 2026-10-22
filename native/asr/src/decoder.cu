@@ -140,8 +140,6 @@ __global__ void attention_step_kernel(const half* __restrict__ q,      // [2048]
   float* scores = shared;  // [length <= kMaxSequence]
   const int kv_head = head / (kTextHeads / kTextKvHeads);
   const half* q_head = q + static_cast<size_t>(head) * kTextHeadDim;
-  const half* k_head = k_cache + static_cast<size_t>(kv_head) * kTextHeadDim;
-  const half* v_head = v_cache + static_cast<size_t>(kv_head) * kTextHeadDim;
   // one thread per cached position computes the 128-dim dot product
   for (int t = threadIdx.x; t < length; t += blockDim.x) {
     float dot = 0.0f;
@@ -178,8 +176,6 @@ __global__ void attention_step_kernel(const half* __restrict__ q,      // [2048]
                                     static_cast<size_t>(kv_head) * kTextHeadDim + d]);
     out_head[d] = __float2half(acc);
   }
-  (void)k_head;
-  (void)v_head;
 }
 
 __global__ void residual_add_kernel(half* __restrict__ x, const half* __restrict__ delta,

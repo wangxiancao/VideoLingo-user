@@ -76,13 +76,16 @@ HF `tokenizers`（Rust 绑定，非 `transformers`）；Python 3.10 仅用于加
 
 ## Task 5: 验证、报告与提交
 
-- [ ] 独立验证代理（实现方之外）复跑：加载器干跑、mel 对照、端到端文本比对、
-      `ldd` 依赖检查、pytest（新增对照脚本测试）。
-- [ ] 报告 `docs/agents/native-asr-m0.md`：分量计时（mel/encoder/projector/prefill/
-      decode）、共享 GPU 标注、限制与遗漏；原始输出进忽略目录
-      `bench/results/native-asr-m0/`。
-- [ ] 提交 `feat/native-asr-540`，更新本文件 checkbox；M1（多块 batch + KV）另立
-      计划，先过维护者审批。
+- [x] 独立验证代理（实现方之外，只读）：**7/7 PASS**——干净重建（0 error）、
+      pytest 9 passed、dump-plan 清单校验、端到端文本门独立复跑（native
+      acc16 = native acc32 = transformers BF16 三方 token 一致、复跑逐字节
+      确定）、ldd 无 torch/vLLM/TensorRT/ONNX、显存峰值 4794 MiB（16 GiB 预算
+      内）、负面用例退出码正确。
+- [x] 报告 `docs/agents/native-asr-m0.md`（共享 GPU 标注、限制与 M1 下一步；
+      M0 为 correctness-only，分量计时留待 M1 计时口径）。原始中间产物在
+      /tmp（验证方证据），大张量不入库。
+- [x] 提交于 `feat/native-asr-m0`（堆叠 PR #42 ← #41）；M1（多块 batch + KV +
+      计时）另立计划。
 
 ## Self-review rulings
 

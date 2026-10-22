@@ -77,7 +77,10 @@ KV cache（causality by construction）。计时口径：correctness-only，不�
 | 依赖纪律 | PASS | ldd 仅 CUDA/cuBLAS/系统库 |
 | 显存预算 16 GB | PASS | 权重常驻 4.52 GiB + 激活/KV（~60 MB）+ staging |
 
-- 独立验证代理复核：见 PR #42 评论（干净重建、全套件、文本门复跑、ldd）。
+- 独立验证代理复核（只读，2026-10-22 晚）：**7/7 PASS**——干净重建 0 error（7 个
+  未使用变量 warning，已清理）；pytest 9 passed；文本门独立复跑三方 token 一致
+  （native acc16 = native acc32 = BF16 参考，复跑逐字节确定）；ldd 干净；显存峰值
+  **4794 MiB**（nvidia-smi 1 Hz 轮询实测）；负面用例退出码正确。证据在 PR #42 评论。
 - 调试钩子：`M0_DEBUG_LAYER0=<dir>` 环境变量转储 layer-0 中间张量（triage 用）。
 
 ## 3. 限制与下一步

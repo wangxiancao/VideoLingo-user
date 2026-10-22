@@ -400,7 +400,6 @@ EncodeOutput run_encode(const std::vector<float>& mel_features, DeviceWeights* w
 
   // 32 pre-LN encoder layers with partial-RoPE attention and GELU MLP.
   const float attn_scale = 1.0f / std::sqrt(static_cast<float>(kHeadDim));
-  const half alpha16 = __float2half(attn_scale);
   for (int layer = 0; layer < kLayers; ++layer) {
     const std::string prefix = "audio_tower.layers." + std::to_string(layer) + ".";
     CUDA_CHECK(cudaMemcpy(d_ln.get(), d_hidden.get(), hidden_count * sizeof(half),
