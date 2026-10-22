@@ -75,11 +75,17 @@ def _build_segments(transcript, boundaries, language):
         if segment_end <= segment_start:
             raise StageError(f"segment: sentence {index} has invalid timing")
         # Adjacent aligner words can overlap by a few ms (zero-duration
-        # clamps, boundary artifacts); best-effort segmentation tolerates
-        # that rather than failing the run, but anything larger is real
-        # disorder and still fails the contract.
-        if previous_end is not None and segment_start < previous_end - 0.05:
-            raise StageError(f"segment: sentence {index} overlaps the previous sentence")
+        # clamps, boundary artifacts). Best-effort segmentation clamps the
+        # sentence start to the previous end so downstream cue timing stays
+        # strictly monotonic; larger disorder still fails the contract.
+        if previous_end is not None:
+            if segment_start < previous_end - 0.05:
+                raise StageError(
+                    f"segment: sentence {index} overlaps the previous sentence"
+                )
+            segment_start = max(segment_start, previous_end)
+            if segment_end <= segment_start:
+                raise StageError(f"segment: sentence {index} has invalid timing")
         previous_end = segment_end
         segments.append(
             {
