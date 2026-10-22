@@ -26,6 +26,11 @@ struct MelOutput {
 // pcm must already be padded/truncated to exactly 480000 samples.
 MelOutput compute_mel(const std::vector<float>& pcm);
 
+// Batched variant: chunks * 480000 samples -> features [chunks, 128, 3000],
+// with the log/normalize pass applied per chunk (matching the reference
+// feature extractor, which processes each waveform independently).
+MelOutput compute_mel_batched(const std::vector<float>& pcm, int chunks);
+
 constexpr int kMelBins = 128;
 constexpr int kFftLength = 400;
 constexpr int kFrequencyBins = kFftLength / 2 + 1;  // 201

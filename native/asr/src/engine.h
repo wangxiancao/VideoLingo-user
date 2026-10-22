@@ -66,6 +66,14 @@ EncodeOutput run_encode(const std::vector<float>& mel_features,
                         DeviceWeights* weights, const EncodeOptions& options,
                         uint16_t* projector_device_out = nullptr);
 
+// Batched audio tower + projector over up to 8 chunks. mel_features is
+// [chunks,128,3000]; projector_device_out (caller-allocated chunks*375*2048
+// halves) receives the FP16 projector outputs for decode. EncodeOutput carries
+// chunk-0 stage dumps for gating.
+EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chunks,
+                                DeviceWeights* weights, const EncodeOptions& options,
+                                uint16_t* projector_device_out);
+
 struct DecodeOptions {
   bool fp16_accumulate = true;
   int max_new_tokens = 256;

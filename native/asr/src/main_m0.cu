@@ -208,6 +208,7 @@ int run_encode(int argc, char** argv) {
   bool fp16_accumulate = true;
   uint64_t samples = 0;
   bool samples_given = false;
+  int chunks = 1;
   for (int i = 2; i < argc; ++i) {
     const std::string arg = argv[i];
     const auto next_value = [&]() -> std::string {
@@ -233,6 +234,13 @@ int run_encode(int argc, char** argv) {
       if (value == "16") fp16_accumulate = true;
       else if (value == "32") fp16_accumulate = false;
       else throw InvalidInput("--gemm-acc must be 16 or 32");
+    } else if (arg == "--chunks") {
+      const std::string value = next_value();
+      char* end = nullptr;
+      const long parsed = std::strtol(value.c_str(), &end, 10);
+      if (value.empty() || !end || *end != '\0' || parsed <= 0 || parsed > 8)
+        throw InvalidInput("--chunks is out of range (1..8): " + value);
+      chunks = static_cast<int>(parsed);
     } else {
       throw InvalidInput("unknown encode argument: " + arg);
     }
@@ -240,13 +248,18 @@ int run_encode(int argc, char** argv) {
   if (model_dir.empty() || pcm_path.empty() || out_dir.empty())
     throw InvalidInput("encode mode requires --model-dir, --pcm and --out-dir");
 
-  const std::vector<float> pcm = read_pcm_padded(pcm_path, samples, samples_given);
-  const MelOutput mel = compute_mel(pcm);
+  const std::vector<float> single = read_pcm_padded(pcm_path, samples, samples_given);
+  std::vector<float> pcm;
+  pcm.reserve(single.size() * chunks);
+  for (int i = 0; i < chunks; ++i) pcm.insert(pcm.end(), single.begin(), single.end());
+  const MelOutput mel = compute_mel_batched(pcm, chunks);
   DeviceWeights weights = load_weights_resident(model_dir, 16384ull * 1024 * 1024);
 
   EncodeOptions options;
   options.fp16_accumulate = fp16_accumulate;
-  const EncodeOutput encoded = run_encode(mel.features, &weights, options);
+  const EncodeOutput encoded =
+      chunks == 1 ? run_encode(mel.features, &weights, options)
+                  : run_encode_batched(mel.features, chunks, &weights, options, nullptr);
 
   const auto write_raw = [&](const std::string& name, const std::vector<float>& data) {
     const std::string path = out_dir + "/" + name;
@@ -274,6 +287,7 @@ int run_encode(int argc, char** argv) {
             << "  \"tool\": \"native_asr_m0_encode\",\n"
             << "  \"measurement_kind\": \"correctness_only\",\n"
             << "  \"gemm_acc\": \"" << (fp16_accumulate ? "fp16" : "fp32") << "\",\n"
+            << "  \"chunks\": " << chunks << ",\n"
             << "  \"out_dir\": \"" << json_escape(out_dir) << "\",\n"
             << "  \"files\": [\"mel.f32\", \"conv.f32\", \"layer_00.f32..layer_31.f32\","
             << " \"norm.f32\", \"projector.f32\"],\n"

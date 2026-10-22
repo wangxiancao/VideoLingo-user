@@ -113,10 +113,13 @@ __device__ int reflect_index(int j, int n) {
 __global__ void stft_power_kernel(const float* __restrict__ pcm, int pcm_length,
                                   const float* __restrict__ wcos,
                                   const float* __restrict__ wsin,
-                                  float* __restrict__ power) {
+                                  float* __restrict__ power, int chunks) {
   const int bin = blockIdx.x * blockDim.x + threadIdx.x;   // 0..200
   const int frame = blockIdx.y * blockDim.y + threadIdx.y; // 0..3000
-  if (bin >= kFrequencyBins || frame >= kFrameCount) return;
+  const int chunk = blockIdx.z;                            // 0..chunks-1
+  if (bin >= kFrequencyBins || frame >= kFrameCount || chunk >= chunks) return;
+  pcm += static_cast<size_t>(chunk) * kChunkSamples;
+  power += static_cast<size_t>(chunk) * kFrequencyBins * kFrameCount;
   const int start = frame * kHopLength - kCenterPad;
   float re = 0.0f, im = 0.0f;
   const float* cos_row = wcos + static_cast<size_t>(bin) * kFftLength;
@@ -132,10 +135,13 @@ __global__ void stft_power_kernel(const float* __restrict__ pcm, int pcm_length,
 // One thread per (mel bin, frame): mel = filterbank^T @ power.
 __global__ void mel_matmul_kernel(const float* __restrict__ filters,
                                   const float* __restrict__ power,
-                                  float* __restrict__ mel) {
+                                  float* __restrict__ mel, int chunks) {
   const int m = blockIdx.x * blockDim.x + threadIdx.x;   // 0..127
   const int frame = blockIdx.y * blockDim.y + threadIdx.y; // 0..3000
-  if (m >= kMelBins || frame >= kFrameCount) return;
+  const int chunk = blockIdx.z;
+  if (m >= kMelBins || frame >= kFrameCount || chunk >= chunks) return;
+  power += static_cast<size_t>(chunk) * kFrequencyBins * kFrameCount;
+  mel += static_cast<size_t>(chunk) * kMelBins * kFrameCount;
   float sum = 0.0f;
   for (int k = 0; k < kFrequencyBins; ++k)
     sum += filters[static_cast<size_t>(k) * kMelBins + m] *
@@ -146,8 +152,12 @@ __global__ void mel_matmul_kernel(const float* __restrict__ filters,
 }  // namespace
 
 MelOutput compute_mel(const std::vector<float>& pcm) {
-  if (pcm.size() != static_cast<size_t>(kChunkSamples))
-    throw ExecutionError("compute_mel expects exactly 480000 padded samples");
+  return compute_mel_batched(pcm, 1);
+}
+
+MelOutput compute_mel_batched(const std::vector<float>& pcm, int chunks) {
+  if (chunks <= 0 || pcm.size() != static_cast<size_t>(chunks) * kChunkSamples)
+    throw ExecutionError("compute_mel_batched expects chunks * 480000 padded samples");
 
   const std::vector<double> filters_host = build_mel_filterbank();
   std::vector<float> wcos, wsin;
@@ -159,36 +169,39 @@ MelOutput compute_mel(const std::vector<float>& pcm) {
   for (size_t i = 0; i < filters_host.size(); ++i)
     filters_gpu_host[i] = static_cast<float>(filters_host[i]);
 
+  const size_t power_total = power_count * chunks;
+  const size_t mel_total = mel_count * chunks;
   float* d_pcm = nullptr;
   float* d_wcos = nullptr;
   float* d_wsin = nullptr;
   float* d_power = nullptr;
   float* d_filters = nullptr;
   float* d_mel = nullptr;
-  std::vector<float> mel_gpu(mel_count);
+  std::vector<float> mel_gpu(mel_total);
   try {
     CUDA_CHECK(cudaMalloc(&d_pcm, pcm.size() * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_wcos, wcos.size() * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_wsin, wsin.size() * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_power, power_count * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_power, power_total * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_filters, filters_gpu_host.size() * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_mel, mel_count * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_mel, mel_total * sizeof(float)));
     CUDA_CHECK(cudaMemcpy(d_pcm, pcm.data(), pcm.size() * sizeof(float), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_wcos, wcos.data(), wcos.size() * sizeof(float), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_wsin, wsin.data(), wsin.size() * sizeof(float), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_filters, filters_gpu_host.data(),
                           filters_gpu_host.size() * sizeof(float), cudaMemcpyHostToDevice));
 
-    const dim3 threads(16, 16);
-    const dim3 stft_blocks((kFrequencyBins + 15) / 16, (kFrameCount + 15) / 16);
-    stft_power_kernel<<<stft_blocks, threads>>>(d_pcm, kChunkSamples, d_wcos, d_wsin, d_power);
+    const dim3 threads(16, 16, 1);
+    const dim3 stft_blocks((kFrequencyBins + 15) / 16, (kFrameCount + 15) / 16, chunks);
+    stft_power_kernel<<<stft_blocks, threads>>>(d_pcm, kChunkSamples, d_wcos, d_wsin,
+                                                d_power, chunks);
     CUDA_CHECK(cudaGetLastError());
-    const dim3 mel_blocks((kMelBins + 15) / 16, (kFrameCount + 15) / 16);
-    mel_matmul_kernel<<<mel_blocks, threads>>>(d_filters, d_power, d_mel);
+    const dim3 mel_blocks((kMelBins + 15) / 16, (kFrameCount + 15) / 16, chunks);
+    mel_matmul_kernel<<<mel_blocks, threads>>>(d_filters, d_power, d_mel, chunks);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    CUDA_CHECK(cudaMemcpy(mel_gpu.data(), d_mel, mel_count * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(mel_gpu.data(), d_mel, mel_total * sizeof(float), cudaMemcpyDeviceToHost));
   } catch (...) {
     cudaFree(d_pcm); cudaFree(d_wcos); cudaFree(d_wsin);
     cudaFree(d_power); cudaFree(d_filters); cudaFree(d_mel);
@@ -198,22 +211,27 @@ MelOutput compute_mel(const std::vector<float>& pcm) {
   cudaFree(d_power); cudaFree(d_filters); cudaFree(d_mel);
 
   // Post-processing on the host in double precision, mirroring the reference:
-  // floor -> log10 -> drop last frame -> clamp to global max - 8 -> (x+4)/4.
+  // floor -> log10 -> drop last frame -> clamp to per-chunk max - 8 -> (x+4)/4.
   MelOutput out;
   out.input_samples = kChunkSamples;
-  out.features.resize(static_cast<size_t>(kMelBins) * kOutputFrames);
-  double global_max = -std::numeric_limits<double>::infinity();
+  const size_t out_count = static_cast<size_t>(kMelBins) * kOutputFrames;
+  out.features.resize(out_count * chunks);
   std::vector<double> log_spec(static_cast<size_t>(kMelBins) * kOutputFrames);
-  for (int m = 0; m < kMelBins; ++m) {
-    for (int f = 0; f < kOutputFrames; ++f) {
-      const double value = std::max(1e-10, static_cast<double>(mel_gpu[static_cast<size_t>(m) * kFrameCount + f]));
-      const double logged = std::log10(value);
-      log_spec[static_cast<size_t>(m) * kOutputFrames + f] = logged;
-      global_max = std::max(global_max, logged);
-    }
+  for (int chunk = 0; chunk < chunks; ++chunk) {
+    const float* src = mel_gpu.data() + static_cast<size_t>(chunk) * mel_count;
+    float* dst = out.features.data() + static_cast<size_t>(chunk) * out_count;
+    double global_max = -std::numeric_limits<double>::infinity();
+    for (int m = 0; m < kMelBins; ++m)
+      for (int f = 0; f < kOutputFrames; ++f) {
+        const double value =
+            std::max(1e-10, static_cast<double>(src[static_cast<size_t>(m) * kFrameCount + f]));
+        const double logged = std::log10(value);
+        log_spec[static_cast<size_t>(m) * kOutputFrames + f] = logged;
+        global_max = std::max(global_max, logged);
+      }
+    const double floor_log = global_max - 8.0;
+    for (size_t i = 0; i < log_spec.size(); ++i)
+      dst[i] = static_cast<float>((std::max(log_spec[i], floor_log) + 4.0) / 4.0);
   }
-  const double floor_log = global_max - 8.0;
-  for (size_t i = 0; i < log_spec.size(); ++i)
-    out.features[i] = static_cast<float>((std::max(log_spec[i], floor_log) + 4.0) / 4.0);
   return out;
 }
