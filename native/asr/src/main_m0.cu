@@ -482,6 +482,7 @@ int run_bench(int argc, char** argv) {
   std::string model_dir, pcm_path, prompt_path, long_pcm_path;
   bool fp16_accumulate = true;
   int chunks = 120, runs = 3;
+  double accept_budget_ms = 6666.667;  // #35 default: 540 RTFx
   for (int i = 2; i < argc; ++i) {
     const std::string arg = argv[i];
     const auto next_value = [&]() -> std::string {
@@ -497,6 +498,11 @@ int run_bench(int argc, char** argv) {
       const long parsed = std::strtol(next_value().c_str(), &end, 10);
       if (end && *end == '\0' && parsed > 0 && parsed <= 128) chunks = static_cast<int>(parsed);
       else throw InvalidInput("--chunks out of range (1..128)");
+    } else if (arg == "--accept-budget-ms") {
+      char* end = nullptr;
+      const double parsed = std::strtod(next_value().c_str(), &end);
+      if (end && *end == '\0' && parsed > 0) accept_budget_ms = parsed;
+      else throw InvalidInput("--accept-budget-ms out of range");
     } else if (arg == "--runs") {
       char* end = nullptr;
       const long parsed = std::strtol(next_value().c_str(), &end, 10);
@@ -614,6 +620,9 @@ int run_bench(int argc, char** argv) {
   for (int i = 0; i < runs; ++i) std::cout << (i ? ", " : "") << decode_ms[i];
   std::cout << "]},\n"
             << "  \"total_stage_ms_median\": " << total << ",\n"
+            << "  \"accept_budget_ms\": " << accept_budget_ms << ",\n"
+            << "  \"asr_acceptance\": " << (total <= accept_budget_ms ? "true" : "false")
+            << ",\n"
             << "  \"replay_gemm_linear_estimate_ms\": 3757.845\n"
             << "}\n";
   return 0;
