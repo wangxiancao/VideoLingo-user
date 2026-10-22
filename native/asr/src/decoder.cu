@@ -132,6 +132,76 @@ __global__ void rope_full_kernel(half* __restrict__ q, half* __restrict__ k,
 
 
 
+
+// ---- Prefill attention re-layout: group-major so each GQA group's
+// (chunk, head-within-group) pairs are contiguous with uniform stride. ----
+// q: concat [chunks*L, 2048] -> [4 groups][chunks][4 hq][L, 128]
+__global__ void scatter_q_groupmajor_kernel(const half* __restrict__ in,
+                                             half* __restrict__ out, int rows, int chunks) {
+  const size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const int hidden = kTextHeads * kTextHeadDim;
+  const size_t total = static_cast<size_t>(rows) * hidden;
+  if (i >= total) return;
+  const int col = static_cast<int>(i % hidden);
+  const int row = static_cast<int>(i / hidden);
+  const int head = col / kTextHeadDim;
+  const int dim = col % kTextHeadDim;
+  const int frames = rows / chunks;
+  const int chunk = row / frames;
+  const int frame = row % frames;
+  const int group = head / (kTextHeads / kTextKvHeads);
+  const int hq = head % (kTextHeads / kTextKvHeads);
+  const size_t batch = (static_cast<size_t>(group) * chunks + chunk) *
+                           (kTextHeads / kTextKvHeads) + hq;
+  out[batch * frames * kTextHeadDim + static_cast<size_t>(frame) * kTextHeadDim + dim] = in[i];
+}
+
+// k/v: concat [chunks*L, 512] -> [4 groups][chunks][4 hq-copies][L, 128]:
+// each KV head is replicated for the 4 query heads of its group so every
+// batched GEMM operand advances with a uniform stride.
+__global__ void scatter_kv_groupmajor_kernel(const half* __restrict__ in,
+                                              half* __restrict__ out, int rows, int chunks) {
+  const size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const int width = kTextKvHeads * kTextHeadDim;
+  const size_t total = static_cast<size_t>(rows) * width;
+  if (i >= total) return;
+  const int col = static_cast<int>(i % width);
+  const int row = static_cast<int>(i / width);
+  const int frames = rows / chunks;
+  const int chunk = row / frames;
+  const int frame = row % frames;
+  const int group = col / kTextHeadDim;
+  const int dim = col % kTextHeadDim;
+  const int copies = kTextHeads / kTextKvHeads;
+  for (int hq = 0; hq < copies; ++hq) {
+    const size_t batch =
+        (static_cast<size_t>(group) * chunks + chunk) * copies + hq;
+    out[batch * frames * kTextHeadDim + static_cast<size_t>(frame) * kTextHeadDim + dim] =
+        in[i];
+  }
+}
+
+// attn out: [4 groups][chunks][4 hq][L, 128] -> concat [chunks*L, 2048]
+__global__ void gather_q_groupmajor_kernel(const half* __restrict__ in,
+                                            half* __restrict__ out, int rows, int chunks) {
+  const size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const int hidden = kTextHeads * kTextHeadDim;
+  const size_t total = static_cast<size_t>(rows) * hidden;
+  if (i >= total) return;
+  const int col = static_cast<int>(i % hidden);
+  const int row = static_cast<int>(i / hidden);
+  const int head = col / kTextHeadDim;
+  const int dim = col % kTextHeadDim;
+  const int frames = rows / chunks;
+  const int chunk = row / frames;
+  const int frame = row % frames;
+  const int group = head / (kTextHeads / kTextKvHeads);
+  const int hq = head % (kTextHeads / kTextKvHeads);
+  const size_t batch = (static_cast<size_t>(group) * chunks + chunk) *
+                           (kTextHeads / kTextKvHeads) + hq;
+  out[i] = in[batch * frames * kTextHeadDim + static_cast<size_t>(frame) * kTextHeadDim + dim];
+}
+
 // ---- Cross-chunk batched decode kernels ----
 
 // Gathers prompt embeddings for a group of chunks: token rows with audio
@@ -899,9 +969,15 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
       static_cast<half*>(g.alloc(group_rows * 6144 * sizeof(half) * 2));
   half* d_mlp_g = d_mlp_group;
   half* d_mlp_u = d_mlp_group + group_rows * 6144;
-  half* d_scores =
-      static_cast<half*>(g.alloc(static_cast<size_t>(kTextHeads) * prompt_length * prompt_length *
-                                 sizeof(half)));
+  half* d_scores = static_cast<half*>(g.alloc(
+      static_cast<size_t>(kGroup) * kTextHeads * prompt_length * prompt_length *
+      sizeof(half)));
+  half* d_q_gm = static_cast<half*>(g.alloc(group_rows * kTextHidden * sizeof(half)));
+  half* d_k_gm =
+      static_cast<half*>(g.alloc(group_rows * kv_width * 4 * sizeof(half)));
+  half* d_v_gm =
+      static_cast<half*>(g.alloc(group_rows * kv_width * 4 * sizeof(half)));
+  half* d_attn_gm = static_cast<half*>(g.alloc(group_rows * kTextHidden * sizeof(half)));
   half* d_kv_cache = static_cast<half*>(g.alloc(static_cast<size_t>(chunks) * chunk_kv_stride *
                                                 sizeof(half)));
   float* d_cos = static_cast<float*>(g.alloc(static_cast<size_t>(kMaxSequence) * 64 * sizeof(float)));
@@ -992,41 +1068,61 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
             0, L);
       }
       CUDA_CHECK(cudaGetLastError());
-      for (int c = 0; c < group; ++c) {
-        const half* q_c = d_q_group + static_cast<size_t>(c) * L * kTextHidden;
-        const half* k_c = d_k_group + static_cast<size_t>(c) * L * kv_width;
-        const half* v_c = d_v_group + static_cast<size_t>(c) * L * kv_width;
-        half* attn_c = d_attn_group + static_cast<size_t>(c) * L * kTextHidden;
-        for (int grp = 0; grp < kTextHeads / kTextKvHeads; ++grp) {
-          const int per = kTextHeads / kTextKvHeads;
+      {
+        // group-major re-layout; per layer: 4 uniform-batch scores GEMMs
+        // (batch = group chunks * 4), one mask + one softmax, 4 PV GEMMs.
+        const size_t q_total = static_cast<size_t>(rows) * kTextHidden;
+        const size_t kv_total = static_cast<size_t>(rows) * kv_width;
+        scatter_q_groupmajor_kernel<<<static_cast<unsigned>((q_total + 255) / 256), 256>>>(
+            d_q_group, d_q_gm, rows, group);
+        scatter_kv_groupmajor_kernel<<<static_cast<unsigned>((kv_total + 255) / 256), 256>>>(
+            d_k_group, d_k_gm, rows, group);
+        scatter_kv_groupmajor_kernel<<<static_cast<unsigned>((kv_total + 255) / 256), 256>>>(
+            d_v_group, d_v_gm, rows, group);
+        CUDA_CHECK(cudaGetLastError());
+        const int per_group = kTextHeads / kTextKvHeads;  // 4
+        const long long head_stride = static_cast<long long>(L) * kTextHeadDim;
+        const long long score_stride = static_cast<long long>(L) * L;
+        for (int grp = 0; grp < kTextKvHeads; ++grp) {
+          const int batch = group * per_group;
+          const half* q_base = d_q_gm + static_cast<size_t>(grp) * group * per_group * L *
+                                             kTextHeadDim;
+          const half* kv_base = d_k_gm + static_cast<size_t>(grp) * group *
+                                                 (kTextHeads / kTextKvHeads) * L *
+                                                 kTextHeadDim;
           CUBLAS_THROW(cublasGemmStridedBatchedEx(
               cublas, CUBLAS_OP_T, CUBLAS_OP_N, L, L, kTextHeadDim,
-              static_cast<const void*>(&attn_scale),
-              k_c + static_cast<size_t>(grp) * kTextHeadDim, CUDA_R_16F,
-              static_cast<int>(kv_width), 0,
-              q_c + static_cast<size_t>(grp) * per * kTextHeadDim, CUDA_R_16F, kTextHidden,
-              kTextHeadDim, static_cast<const void*>(&zero32),
-              d_scores + static_cast<size_t>(grp) * per * prompt_length * prompt_length,
-              CUDA_R_16F, L, static_cast<long long>(prompt_length) * prompt_length, per,
-              CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
+              static_cast<const void*>(&attn_scale), kv_base, CUDA_R_16F, kTextHeadDim,
+              head_stride, q_base, CUDA_R_16F, kTextHeadDim, head_stride,
+              static_cast<const void*>(&zero32),
+              d_scores + static_cast<size_t>(grp) * group * per_group * L * L, CUDA_R_16F, L,
+              score_stride, batch, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
         }
-        causal_mask_kernel<<<dim3((L + 15) / 16, (L + 15) / 16), dim3(16, 16)>>>(d_scores,
-                                                                                 kTextHeads, L);
+        causal_mask_kernel<<<dim3((L + 15) / 16, (L + 15) / 16), dim3(16, 16)>>>(
+            d_scores, kTextHeads * group, L);
         CUDA_CHECK(cudaGetLastError());
-        softmax_rows_kernel<<<dim3(L, kTextHeads), 256>>>(d_scores, kTextHeads, L);
+        softmax_rows_kernel<<<dim3(L, kTextHeads * group), 256>>>(d_scores, kTextHeads * group,
+                                                                  L);
         CUDA_CHECK(cudaGetLastError());
-        for (int grp = 0; grp < kTextHeads / kTextKvHeads; ++grp) {
+        for (int grp = 0; grp < kTextKvHeads; ++grp) {
           const int per = kTextHeads / kTextKvHeads;
+          const int batch = group * per;
+          const half* v_base = d_v_gm + static_cast<size_t>(grp) * group *
+                                               (kTextHeads / kTextKvHeads) * L *
+                                               kTextHeadDim;
           CUBLAS_THROW(cublasGemmStridedBatchedEx(
               cublas, CUBLAS_OP_N, CUBLAS_OP_N, kTextHeadDim, L, L,
-              static_cast<const void*>(&one32), v_c + static_cast<size_t>(grp) * kTextHeadDim,
-              CUDA_R_16F, static_cast<int>(kv_width), 0,
-              d_scores + static_cast<size_t>(grp) * per * prompt_length * prompt_length,
-              CUDA_R_16F, L, static_cast<long long>(prompt_length) * prompt_length,
-              static_cast<const void*>(&zero_h),
-              attn_c + static_cast<size_t>(grp) * per * kTextHeadDim, CUDA_R_16F, kTextHidden,
-              kTextHeadDim, per, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
+              static_cast<const void*>(&one32), v_base, CUDA_R_16F, kTextHeadDim,
+              head_stride,
+              d_scores + static_cast<size_t>(grp) * group * per * L * L, CUDA_R_16F, L,
+              score_stride, static_cast<const void*>(&zero_h),
+              d_attn_gm + static_cast<size_t>(grp) * group * per * L * kTextHeadDim,
+              CUDA_R_16F, kTextHeadDim, head_stride, batch, CUBLAS_COMPUTE_32F,
+              CUBLAS_GEMM_DEFAULT));
         }
+        gather_q_groupmajor_kernel<<<static_cast<unsigned>((q_total + 255) / 256), 256>>>(
+            d_attn_gm, d_attn_group, rows, group);
+        CUDA_CHECK(cudaGetLastError());
       }
       gemm(weight(p + "self_attn.o_proj.weight"), d_attn_group, d_scratch_group, rows,
            kTextHidden, kTextHidden);
