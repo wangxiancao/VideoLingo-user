@@ -1,0 +1,40 @@
+{
+  "audio": "/tmp/t2b-real/zh_real_30s.wav",
+  "duration_s": 30.0,
+  "chunks": 1,
+  "chunk_seconds": 30.0,
+  "batch_size": 1,
+  "max_new_tokens": 512,
+  "model": "/root/.cache/modelscope/ZhipuAI/GLM-ASR-Nano-2512",
+  "config": {
+    "max_model_len": 4096,
+    "max_num_seqs": 32,
+    "gpu_util": 0.45,
+    "enforce_eager": false
+  },
+  "load_time_s": 30.6609,
+  "cold_wall_s": 39.8398,
+  "warmup_s": 0.4875,
+  "infer_times_s": [
+    0.3528,
+    0.3549,
+    0.3563
+  ],
+  "infer_median_s": 0.3549,
+  "hot_rtfx": 84.54,
+  "load_peak_alloc_mib": 0.0,
+  "load_peak_reserved_mib": 0.0,
+  "load_peak_gpu_total_mib": 20318,
+  "infer_peak_alloc_mib": 0.0,
+  "infer_peak_reserved_mib": 0.0,
+  "infer_peak_gpu_total_mib": 20571,
+  "gpu_delta_after_load_mib": 10900,
+  "gpu_delta_infer_peak_mib": 10900,
+  "gpu_used_before_mib": 9671,
+  "gpu_used_after_load_mib": 20571,
+  "gpu_used_end_mib": 20570,
+  "gpu_total_mib": 24576,
+  "text_chars": 92,
+  "text_nonempty_chunks": 1,
+  "text": "收，但国民党立委王鸿威爆料，上次协商时，吴乃仁只愿每月还五万元，让王鸿威忍不住讽刺，难道要还到三百七十九岁吗？我七月十六日得到的消息是，吴乃仁方面提出的还款条件是每月还五万元，分期长。"
+}

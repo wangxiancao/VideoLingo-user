@@ -1,0 +1,18 @@
+Command:
+  cd /root/VideoLingo-refactor
+  /root/VideoLingo/.venv/bin/python /tmp/fp16-probe/probe.py \
+    --audio /tmp/fp16-probe/pi_1440s.wav --glm-dtype fp16 --batch-size 48 \
+    --mode hot --warmups 1 --runs 2 --language Chinese \
+    --output bench/results/fp16-probe/r1440_fp16_b48_hot.json
+
+Result: OOM during the first warmup pass, before any JSON was written.
+GPU: 23.57 GiB total, 3.86 GiB free at failure; external processes held
+7.24 GiB + 0.91 GiB. PyTorch had 10.33 GiB in use (9.97 GiB allocated).
+
+Traceback excerpt:
+  File ".../transformers/models/qwen3_asr/modeling_qwen3_asr.py", line 406, in forward
+    conv_out = F.gelu(self.conv2d1(chunked))
+  torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 4.12 GiB.
+
+Conclusion: batch 48 is not feasible with ASR + aligner on this shared GPU;
+batch 40 is the measured maximum. No external process was killed.

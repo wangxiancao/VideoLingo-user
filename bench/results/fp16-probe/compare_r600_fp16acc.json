@@ -1,0 +1,707 @@
+{
+  "audio": {
+    "path": "/tmp/fp16-probe/pi_600s.wav",
+    "duration_s": 600.0,
+    "sample_rate": 16000,
+    "chunks": 20,
+    "chunk_seconds": 30.0,
+    "chunk_lengths_s": [
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0,
+      30.0
+    ]
+  },
+  "config": {
+    "glm_dtype": "fp16",
+    "aligner_dtype": "fp16",
+    "glm_model_dtype": "torch.float16",
+    "aligner_model_dtype": "torch.float16",
+    "fp16_accum": true,
+    "batch_size": 20,
+    "chunk_seconds": 30.0,
+    "max_new_tokens": 512,
+    "language": "Chinese",
+    "warmups": 1,
+    "runs": 3
+  },
+  "fp16_summary": {
+    "runs": 3,
+    "asr_rtfx_median": 141.21890217919164,
+    "asr_rtfx_min": 135.0996863494145,
+    "asr_rtfx_max": 141.24947206710283,
+    "total_rtfx_median": 112.73887915738315,
+    "total_rtfx_min": 109.20907110348305,
+    "total_rtfx_max": 113.10446953849582,
+    "asr_s_median": 4.248723016120493,
+    "align_s_median": 1.056107132928446,
+    "asr_generate_s_median": 4.111607004189864,
+    "align_forward_s_median": 0.6800602900329977,
+    "asr_share_of_total": 0.8009159382571774,
+    "vram_peak_allocated_mb": 10299.0,
+    "vram_peak_reserved_mb": 13222.0,
+    "nvidia_used_max_mb": 23170,
+    "words": 2696,
+    "generated_tokens_total": 1719
+  },
+  "bf16_summary": {
+    "runs": 3,
+    "asr_rtfx_median": 150.56505147959592,
+    "asr_rtfx_min": 147.78369199821705,
+    "asr_rtfx_max": 151.57766256998733,
+    "total_rtfx_median": 115.45697226901801,
+    "total_rtfx_min": 112.48961332702018,
+    "total_rtfx_max": 116.78058806119436,
+    "asr_s_median": 3.9849885089788586,
+    "align_s_median": 1.2117526510264724,
+    "asr_generate_s_median": 3.8200603290461004,
+    "align_forward_s_median": 0.8121210660319775,
+    "asr_share_of_total": 0.7668245129558792,
+    "vram_peak_allocated_mb": 10300.0,
+    "vram_peak_reserved_mb": 13224.0,
+    "nvidia_used_max_mb": 23169,
+    "words": 2695,
+    "generated_tokens_total": 1718
+  },
+  "text": {
+    "chunks": 20,
+    "exact_chunks": 16,
+    "cer": 0.002289077828646174,
+    "edit_distance": 7,
+    "reference_chars": 3058,
+    "cer_no_whitespace": 0.0019723865877712033,
+    "fp16_chars": 3060,
+    "bf16_chars": 3058,
+    "per_chunk": [
+      {
+        "chunk": 0,
+        "exact": true,
+        "fp16_chars": 142,
+        "bf16_chars": 142,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 1,
+        "exact": true,
+        "fp16_chars": 127,
+        "bf16_chars": 127,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 2,
+        "exact": false,
+        "fp16_chars": 113,
+        "bf16_chars": 113,
+        "edit_distance": 1,
+        "cer": 0.008849557522123894
+      },
+      {
+        "chunk": 3,
+        "exact": false,
+        "fp16_chars": 157,
+        "bf16_chars": 158,
+        "edit_distance": 3,
+        "cer": 0.0189873417721519
+      },
+      {
+        "chunk": 4,
+        "exact": false,
+        "fp16_chars": 203,
+        "bf16_chars": 201,
+        "edit_distance": 2,
+        "cer": 0.009950248756218905
+      },
+      {
+        "chunk": 5,
+        "exact": true,
+        "fp16_chars": 184,
+        "bf16_chars": 184,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 6,
+        "exact": true,
+        "fp16_chars": 163,
+        "bf16_chars": 163,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 7,
+        "exact": true,
+        "fp16_chars": 140,
+        "bf16_chars": 140,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 8,
+        "exact": false,
+        "fp16_chars": 151,
+        "bf16_chars": 150,
+        "edit_distance": 1,
+        "cer": 0.006666666666666667
+      },
+      {
+        "chunk": 9,
+        "exact": true,
+        "fp16_chars": 123,
+        "bf16_chars": 123,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 10,
+        "exact": true,
+        "fp16_chars": 151,
+        "bf16_chars": 151,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 11,
+        "exact": true,
+        "fp16_chars": 180,
+        "bf16_chars": 180,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 12,
+        "exact": true,
+        "fp16_chars": 155,
+        "bf16_chars": 155,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 13,
+        "exact": true,
+        "fp16_chars": 140,
+        "bf16_chars": 140,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 14,
+        "exact": true,
+        "fp16_chars": 160,
+        "bf16_chars": 160,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 15,
+        "exact": true,
+        "fp16_chars": 143,
+        "bf16_chars": 143,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 16,
+        "exact": true,
+        "fp16_chars": 158,
+        "bf16_chars": 158,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 17,
+        "exact": true,
+        "fp16_chars": 151,
+        "bf16_chars": 151,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 18,
+        "exact": true,
+        "fp16_chars": 173,
+        "bf16_chars": 173,
+        "edit_distance": 0,
+        "cer": 0.0
+      },
+      {
+        "chunk": 19,
+        "exact": true,
+        "fp16_chars": 146,
+        "bf16_chars": 146,
+        "edit_distance": 0,
+        "cer": 0.0
+      }
+    ]
+  },
+  "timestamps": {
+    "chunks_compared": 16,
+    "word_pairs": 2181,
+    "word_text_mismatch": 0,
+    "start_delta": {
+      "count": 2181,
+      "mean": 0.0002934433745988073,
+      "median": 0.0,
+      "p95": 0.0,
+      "max": 0.16000000000000014,
+      "gt_0.08s": 4,
+      "gt_0.16s": 1,
+      "gt_0.32s": 0
+    },
+    "end_delta": {
+      "count": 2181,
+      "mean": 0.0005502063273727653,
+      "median": 0.0,
+      "p95": 0.0,
+      "max": 0.16000000000000014,
+      "gt_0.08s": 9,
+      "gt_0.16s": 2,
+      "gt_0.32s": 0
+    },
+    "word_counts": [
+      {
+        "chunk": 0,
+        "fp16": 126,
+        "bf16": 126
+      },
+      {
+        "chunk": 1,
+        "fp16": 118,
+        "bf16": 118
+      },
+      {
+        "chunk": 2,
+        "fp16": 94,
+        "bf16": 94
+      },
+      {
+        "chunk": 3,
+        "fp16": 137,
+        "bf16": 137
+      },
+      {
+        "chunk": 4,
+        "fp16": 146,
+        "bf16": 145
+      },
+      {
+        "chunk": 5,
+        "fp16": 168,
+        "bf16": 168
+      },
+      {
+        "chunk": 6,
+        "fp16": 148,
+        "bf16": 148
+      },
+      {
+        "chunk": 7,
+        "fp16": 126,
+        "bf16": 126
+      },
+      {
+        "chunk": 8,
+        "fp16": 138,
+        "bf16": 138
+      },
+      {
+        "chunk": 9,
+        "fp16": 111,
+        "bf16": 111
+      },
+      {
+        "chunk": 10,
+        "fp16": 135,
+        "bf16": 135
+      },
+      {
+        "chunk": 11,
+        "fp16": 148,
+        "bf16": 148
+      },
+      {
+        "chunk": 12,
+        "fp16": 138,
+        "bf16": 138
+      },
+      {
+        "chunk": 13,
+        "fp16": 125,
+        "bf16": 125
+      },
+      {
+        "chunk": 14,
+        "fp16": 144,
+        "bf16": 144
+      },
+      {
+        "chunk": 15,
+        "fp16": 131,
+        "bf16": 131
+      },
+      {
+        "chunk": 16,
+        "fp16": 142,
+        "bf16": 142
+      },
+      {
+        "chunk": 17,
+        "fp16": 135,
+        "bf16": 135
+      },
+      {
+        "chunk": 18,
+        "fp16": 152,
+        "bf16": 152
+      },
+      {
+        "chunk": 19,
+        "fp16": 134,
+        "bf16": 134
+      }
+    ],
+    "fp16_problems": [
+      {
+        "chunk": 0,
+        "problems": [
+          "zero_length:1"
+        ]
+      },
+      {
+        "chunk": 3,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 4,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 5,
+        "problems": [
+          "zero_length:5"
+        ]
+      },
+      {
+        "chunk": 6,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 8,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 9,
+        "problems": [
+          "zero_length:1"
+        ]
+      },
+      {
+        "chunk": 10,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 11,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 12,
+        "problems": [
+          "zero_length:1"
+        ]
+      },
+      {
+        "chunk": 14,
+        "problems": [
+          "zero_length:1"
+        ]
+      },
+      {
+        "chunk": 15,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 16,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 17,
+        "problems": [
+          "zero_length:1"
+        ]
+      },
+      {
+        "chunk": 19,
+        "problems": [
+          "zero_length:3"
+        ]
+      }
+    ],
+    "bf16_problems": [
+      {
+        "chunk": 0,
+        "problems": [
+          "zero_length:1"
+        ]
+      },
+      {
+        "chunk": 3,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 4,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 5,
+        "problems": [
+          "zero_length:5"
+        ]
+      },
+      {
+        "chunk": 6,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 8,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 9,
+        "problems": [
+          "zero_length:1"
+        ]
+      },
+      {
+        "chunk": 10,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 11,
+        "problems": [
+          "zero_length:3"
+        ]
+      },
+      {
+        "chunk": 12,
+        "problems": [
+          "zero_length:1"
+        ]
+      },
+      {
+        "chunk": 14,
+        "problems": [
+          "zero_length:1"
+        ]
+      },
+      {
+        "chunk": 15,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 16,
+        "problems": [
+          "zero_length:2"
+        ]
+      },
+      {
+        "chunk": 17,
+        "problems": [
+          "zero_length:1"
+        ]
+      },
+      {
+        "chunk": 19,
+        "problems": [
+          "zero_length:3"
+        ]
+      }
+    ],
+    "fp16_clamp_errors": [],
+    "bf16_clamp_errors": []
+  },
+  "stability": {
+    "fp16_texts_identical_across_runs": true,
+    "bf16_texts_identical_across_runs": true,
+    "fp16_generated_tokens": [
+      [
+        90,
+        74,
+        67,
+        84,
+        102,
+        98,
+        95,
+        77,
+        86,
+        69,
+        83,
+        87,
+        90,
+        77,
+        95,
+        86,
+        89,
+        79,
+        107,
+        84
+      ],
+      [
+        90,
+        74,
+        67,
+        84,
+        102,
+        98,
+        95,
+        77,
+        86,
+        69,
+        83,
+        87,
+        90,
+        77,
+        95,
+        86,
+        89,
+        79,
+        107,
+        84
+      ],
+      [
+        90,
+        74,
+        67,
+        84,
+        102,
+        98,
+        95,
+        77,
+        86,
+        69,
+        83,
+        87,
+        90,
+        77,
+        95,
+        86,
+        89,
+        79,
+        107,
+        84
+      ]
+    ],
+    "bf16_generated_tokens": [
+      [
+        90,
+        74,
+        67,
+        84,
+        101,
+        98,
+        95,
+        77,
+        86,
+        69,
+        83,
+        87,
+        90,
+        77,
+        95,
+        86,
+        89,
+        79,
+        107,
+        84
+      ],
+      [
+        90,
+        74,
+        67,
+        84,
+        101,
+        98,
+        95,
+        77,
+        86,
+        69,
+        83,
+        87,
+        90,
+        77,
+        95,
+        86,
+        89,
+        79,
+        107,
+        84
+      ],
+      [
+        90,
+        74,
+        67,
+        84,
+        101,
+        98,
+        95,
+        77,
+        86,
+        69,
+        83,
+        87,
+        90,
+        77,
+        95,
+        86,
+        89,
+        79,
+        107,
+        84
+      ]
+    ]
+  }
+}

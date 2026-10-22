@@ -1,0 +1,547 @@
+{
+  "schema_version": 1,
+  "mode": "cold",
+  "audio": {
+    "path": "/tmp/fp16-probe/zh_30s.wav",
+    "duration_s": 30.0,
+    "sample_rate": 16000,
+    "chunks": 1,
+    "chunk_seconds": 30.0,
+    "chunk_lengths_s": [
+      30.0
+    ]
+  },
+  "config": {
+    "glm_dtype": "bf16",
+    "aligner_dtype": "bf16",
+    "glm_model_dtype": "torch.bfloat16",
+    "aligner_model_dtype": "torch.bfloat16",
+    "fp16_accum": false,
+    "batch_size": 1,
+    "chunk_seconds": 30.0,
+    "max_new_tokens": 512,
+    "language": "Chinese",
+    "warmups": 1,
+    "runs": 3
+  },
+  "models": {
+    "paths": {
+      "ZhipuAI/GLM-ASR-Nano-2512": "/root/.cache/modelscope/ZhipuAI/GLM-ASR-Nano-2512",
+      "Qwen/Qwen3-ForcedAligner-0.6B-hf": "/root/.cache/modelscope/Qwen/Qwen3-ForcedAligner-0___6B-hf"
+    },
+    "glm_params": 2136470528,
+    "aligner_params": 917728896
+  },
+  "environment": {
+    "torch": "2.11.0+cu129",
+    "transformers": "5.14.1",
+    "cuda": "12.9",
+    "gpu_name": "NVIDIA GeForce RTX 3090",
+    "fp16_reduced_precision_reduction": true,
+    "cublas_workaround_env": {
+      "CUBLAS_WORKSPACE_CONFIG": null,
+      "CUBLAS_LOGINFO_DBG": null
+    },
+    "before_load": {
+      "free_mb": 14234.8,
+      "total_mb": 24132.2,
+      "torch_allocated_mb": 0.0,
+      "torch_reserved_mb": 0.0
+    },
+    "after_load": {
+      "free_mb": 8361.6,
+      "total_mb": 24132.2,
+      "torch_allocated_mb": 5826.6,
+      "torch_reserved_mb": 5846.0
+    }
+  },
+  "load_s": 4.114827560959384,
+  "load_peak": {
+    "vram_peak_allocated_mb": 5826.6,
+    "vram_peak_reserved_mb": 5846.0
+  },
+  "runs": [
+    {
+      "texts": [
+        "收，但国民党立委王鸿威爆料，上次协商时，吴乃仁只愿每月还五万元，让王鸿威忍不住讽刺，难道要还到三百七十九岁吗？我七月十六日得到的消息是，吴乃仁方面提出的还款条件是每月还五万元，分期长。"
+      ],
+      "words": [
+        {
+          "chunk_index": 0,
+          "text": "收，但国民党立委王鸿威爆料，上次协商时，吴乃仁只愿每月还五万元，让王鸿威忍不住讽刺，难道要还到三百七十九岁吗？我七月十六日得到的消息是，吴乃仁方面提出的还款条件是每月还五万元，分期长。",
+          "timestamps": [
+            {
+              "text": "收",
+              "start": 0.0,
+              "end": 0.32
+            },
+            {
+              "text": "但",
+              "start": 0.8,
+              "end": 0.96
+            },
+            {
+              "text": "国",
+              "start": 0.96,
+              "end": 1.12
+            },
+            {
+              "text": "民",
+              "start": 1.12,
+              "end": 1.36
+            },
+            {
+              "text": "党",
+              "start": 1.36,
+              "end": 1.6
+            },
+            {
+              "text": "立",
+              "start": 1.6,
+              "end": 1.68
+            },
+            {
+              "text": "委",
+              "start": 1.68,
+              "end": 1.84
+            },
+            {
+              "text": "王",
+              "start": 1.84,
+              "end": 2.08
+            },
+            {
+              "text": "鸿",
+              "start": 2.08,
+              "end": 2.24
+            },
+            {
+              "text": "威",
+              "start": 2.24,
+              "end": 2.48
+            },
+            {
+              "text": "爆",
+              "start": 2.48,
+              "end": 2.64
+            },
+            {
+              "text": "料",
+              "start": 2.64,
+              "end": 2.8
+            },
+            {
+              "text": "上",
+              "start": 2.8,
+              "end": 3.04
+            },
+            {
+              "text": "次",
+              "start": 3.04,
+              "end": 3.2
+            },
+            {
+              "text": "协",
+              "start": 3.2,
+              "end": 3.36
+            },
+            {
+              "text": "商",
+              "start": 3.36,
+              "end": 3.6
+            },
+            {
+              "text": "时",
+              "start": 3.6,
+              "end": 4.0
+            },
+            {
+              "text": "吴",
+              "start": 5.68,
+              "end": 5.76
+            },
+            {
+              "text": "乃",
+              "start": 5.76,
+              "end": 6.0
+            },
+            {
+              "text": "仁",
+              "start": 6.0,
+              "end": 6.32
+            },
+            {
+              "text": "只",
+              "start": 6.32,
+              "end": 6.48
+            },
+            {
+              "text": "愿",
+              "start": 6.48,
+              "end": 6.64
+            },
+            {
+              "text": "每",
+              "start": 6.64,
+              "end": 6.8
+            },
+            {
+              "text": "月",
+              "start": 6.8,
+              "end": 6.96
+            },
+            {
+              "text": "还",
+              "start": 6.96,
+              "end": 7.28
+            },
+            {
+              "text": "五",
+              "start": 7.28,
+              "end": 7.44
+            },
+            {
+              "text": "万",
+              "start": 7.44,
+              "end": 7.68
+            },
+            {
+              "text": "元",
+              "start": 7.68,
+              "end": 8.0
+            },
+            {
+              "text": "让",
+              "start": 8.16,
+              "end": 8.4
+            },
+            {
+              "text": "王",
+              "start": 8.4,
+              "end": 8.56
+            },
+            {
+              "text": "鸿",
+              "start": 8.56,
+              "end": 8.72
+            },
+            {
+              "text": "威",
+              "start": 8.72,
+              "end": 8.88
+            },
+            {
+              "text": "忍",
+              "start": 8.88,
+              "end": 9.12
+            },
+            {
+              "text": "不",
+              "start": 9.12,
+              "end": 9.12
+            },
+            {
+              "text": "住",
+              "start": 9.12,
+              "end": 9.28
+            },
+            {
+              "text": "讽",
+              "start": 9.28,
+              "end": 9.6
+            },
+            {
+              "text": "刺",
+              "start": 9.6,
+              "end": 9.84
+            },
+            {
+              "text": "难",
+              "start": 10.64,
+              "end": 10.88
+            },
+            {
+              "text": "道",
+              "start": 10.88,
+              "end": 11.04
+            },
+            {
+              "text": "要",
+              "start": 11.04,
+              "end": 11.28
+            },
+            {
+              "text": "还",
+              "start": 11.28,
+              "end": 11.44
+            },
+            {
+              "text": "到",
+              "start": 11.44,
+              "end": 11.68
+            },
+            {
+              "text": "三",
+              "start": 11.68,
+              "end": 11.92
+            },
+            {
+              "text": "百",
+              "start": 11.92,
+              "end": 12.0
+            },
+            {
+              "text": "七",
+              "start": 12.0,
+              "end": 12.16
+            },
+            {
+              "text": "十",
+              "start": 12.16,
+              "end": 12.32
+            },
+            {
+              "text": "九",
+              "start": 12.32,
+              "end": 12.56
+            },
+            {
+              "text": "岁",
+              "start": 12.56,
+              "end": 12.8
+            },
+            {
+              "text": "吗",
+              "start": 12.8,
+              "end": 13.04
+            },
+            {
+              "text": "我",
+              "start": 13.6,
+              "end": 13.76
+            },
+            {
+              "text": "七",
+              "start": 13.76,
+              "end": 14.0
+            },
+            {
+              "text": "月",
+              "start": 14.0,
+              "end": 14.16
+            },
+            {
+              "text": "十",
+              "start": 14.16,
+              "end": 14.32
+            },
+            {
+              "text": "六",
+              "start": 14.32,
+              "end": 14.56
+            },
+            {
+              "text": "日",
+              "start": 14.56,
+              "end": 14.72
+            },
+            {
+              "text": "得",
+              "start": 14.72,
+              "end": 14.88
+            },
+            {
+              "text": "到",
+              "start": 14.88,
+              "end": 15.04
+            },
+            {
+              "text": "的",
+              "start": 15.04,
+              "end": 15.12
+            },
+            {
+              "text": "消",
+              "start": 15.12,
+              "end": 15.28
+            },
+            {
+              "text": "息",
+              "start": 15.28,
+              "end": 15.44
+            },
+            {
+              "text": "是",
+              "start": 15.44,
+              "end": 15.76
+            },
+            {
+              "text": "吴",
+              "start": 18.4,
+              "end": 18.56
+            },
+            {
+              "text": "乃",
+              "start": 18.56,
+              "end": 18.72
+            },
+            {
+              "text": "仁",
+              "start": 18.72,
+              "end": 18.96
+            },
+            {
+              "text": "方",
+              "start": 18.96,
+              "end": 19.12
+            },
+            {
+              "text": "面",
+              "start": 19.12,
+              "end": 19.36
+            },
+            {
+              "text": "提",
+              "start": 19.36,
+              "end": 19.52
+            },
+            {
+              "text": "出",
+              "start": 19.52,
+              "end": 19.68
+            },
+            {
+              "text": "的",
+              "start": 19.68,
+              "end": 19.76
+            },
+            {
+              "text": "还",
+              "start": 19.76,
+              "end": 19.92
+            },
+            {
+              "text": "款",
+              "start": 19.92,
+              "end": 20.16
+            },
+            {
+              "text": "条",
+              "start": 20.16,
+              "end": 20.32
+            },
+            {
+              "text": "件",
+              "start": 20.32,
+              "end": 20.64
+            },
+            {
+              "text": "是",
+              "start": 20.72,
+              "end": 20.88
+            },
+            {
+              "text": "每",
+              "start": 20.88,
+              "end": 21.12
+            },
+            {
+              "text": "月",
+              "start": 21.12,
+              "end": 21.28
+            },
+            {
+              "text": "还",
+              "start": 21.28,
+              "end": 21.52
+            },
+            {
+              "text": "五",
+              "start": 21.52,
+              "end": 21.68
+            },
+            {
+              "text": "万",
+              "start": 21.68,
+              "end": 21.92
+            },
+            {
+              "text": "元",
+              "start": 21.92,
+              "end": 22.24
+            },
+            {
+              "text": "分",
+              "start": 29.44,
+              "end": 29.6
+            },
+            {
+              "text": "期",
+              "start": 29.6,
+              "end": 29.76
+            },
+            {
+              "text": "长",
+              "start": 29.76,
+              "end": 29.92
+            }
+          ]
+        }
+      ],
+      "words_count": 83,
+      "asr_s": 2.0638728470075876,
+      "asr_generate_s": 1.9244220610707998,
+      "align_s": 0.11493735504336655,
+      "align_forward_s": 0.08757998701184988,
+      "processor_s": 0.12492810003459454,
+      "to_device_s": 0.014133114833384752,
+      "generated_tokens": [
+        62
+      ],
+      "aligner_logits": {
+        "finite": true,
+        "min": -17.625,
+        "max": 17.75
+      },
+      "sanity": {
+        "text": [
+          []
+        ],
+        "timestamps": [
+          {
+            "chunk": 0,
+            "problems": [
+              "zero_length:1"
+            ]
+          }
+        ]
+      },
+      "clamp_errors": [],
+      "run": 1,
+      "wall_s": 2.187979337060824,
+      "rtfx": 13.711281222746768,
+      "vram_peak_allocated_mb": 6062.0,
+      "vram_peak_reserved_mb": 6228.0,
+      "nvidia_used_max_mb": 16168
+    }
+  ],
+  "summary": {
+    "runs": 1,
+    "asr_rtfx_median": 14.535779199526292,
+    "asr_rtfx_min": 14.535779199526292,
+    "asr_rtfx_max": 14.535779199526292,
+    "total_rtfx_median": 13.768982709811276,
+    "total_rtfx_min": 13.768982709811276,
+    "total_rtfx_max": 13.768982709811276,
+    "asr_s_median": 2.0638728470075876,
+    "align_s_median": 0.11493735504336655,
+    "asr_generate_s_median": 1.9244220610707998,
+    "align_forward_s_median": 0.08757998701184988,
+    "asr_share_of_total": 0.9472476515232149,
+    "vram_peak_allocated_mb": 6062.0,
+    "vram_peak_reserved_mb": 6228.0,
+    "nvidia_used_max_mb": 16168,
+    "words": 83,
+    "generated_tokens_total": 62
+  }
+}
