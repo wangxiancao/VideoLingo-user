@@ -1214,21 +1214,9 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
     ~HandleGuard() { if (handle) cublasDestroy(handle); }
   } guard{cublas};
 
-  const int m_pad = (chunks + 31) / 32 * 32;  // tensor-core tile aligned rows
+  LtGemmCache lt_gemm;
   const auto gemm = [&](const half* w, const half* x, half* y, int m, int n, int k) {
-    const int rows_gemm = m == chunks ? m_pad : m;  // pad the decode-step batch only
-    const half alpha16 = __float2half(1.0f), beta16 = __float2half(0.0f);
-    const float alpha32 = 1.0f, beta32 = 0.0f;
-    CUBLAS_THROW(cublasGemmEx(
-        cublas, CUBLAS_OP_T, CUBLAS_OP_N, n, rows_gemm, k,
-        options.fp16_accumulate ? static_cast<const void*>(&alpha16)
-                                : static_cast<const void*>(&alpha32),
-        w, CUDA_R_16F, k, x, CUDA_R_16F, k,
-        options.fp16_accumulate ? static_cast<const void*>(&beta16)
-                                : static_cast<const void*>(&beta32),
-        y, CUDA_R_16F, n,
-        options.fp16_accumulate ? CUBLAS_COMPUTE_16F : CUBLAS_COMPUTE_32F,
-        CUBLAS_GEMM_DEFAULT));
+    lt_gemm.run(w, x, y, m, n, k, options.fp16_accumulate, lt_stream_for(cublas));
   };
   const auto weight = [&](const std::string& name) -> const half* {
     const DeviceWeights::Entry* entry = weights->find(name);
@@ -1274,7 +1262,7 @@ DecodeBatchResult run_decode_batched(DeviceWeights* weights,
   float* d_sin = static_cast<float*>(g.alloc(static_cast<size_t>(kMaxSequence) * 64 * sizeof(float)));
   // lockstep decode buffers (full batch)
   const size_t batch_rows = static_cast<size_t>(chunks);
-  const size_t pad_rows = static_cast<size_t>(m_pad);
+  const size_t pad_rows = static_cast<size_t>((chunks + 31) / 32 * 32);
   half* d_ids_batch =
       static_cast<half*>(g.alloc(pad_rows * kTextHidden * sizeof(half)));  // embed rows
   half* d_h = static_cast<half*>(g.alloc(pad_rows * kTextHidden * sizeof(half)));

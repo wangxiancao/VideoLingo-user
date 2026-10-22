@@ -27,5 +27,5 @@ target_compile_options(glm_asr_m0 PRIVATE
   $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wpedantic>
   $<$<COMPILE_LANGUAGE:CUDA>:--std=c++17;--expt-relaxed-constexpr;-gencode=arch=compute_86,code=sm_86;--compiler-options=-Wall,-Wextra>
 )
-target_link_libraries(glm_asr_m0 PRIVATE cublas)
+target_link_libraries(glm_asr_m0 PRIVATE cublas /usr/local/cuda-12.8/lib64/libcublasLt_static.a culibos)
 

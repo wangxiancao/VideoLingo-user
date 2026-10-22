@@ -648,6 +648,42 @@ __global__ void softmax_rows_kernel(half* __restrict__ scores, int heads, int le
     row[j] = __float2half(__expf(__half2float(row[j]) - maximum) * inv);
 }
 
+// Fused variant: cache the row in shared memory once (single global read),
+// compute max/exp/sum in smem, single global write. Replaces 3 reads + 2
+// writes per element with 1 read + 1 write.
+__global__ void softmax_rows_fused_kernel(half* __restrict__ scores, int heads, int length) {
+  const int query = blockIdx.x;
+  const int head = blockIdx.y;
+  if (query >= length || head >= heads) return;
+  extern __shared__ float cached[];  // [length]
+  half* row = scores + static_cast<size_t>(head) * length * length +
+              static_cast<size_t>(query) * length;
+  __shared__ float shared[256];
+  for (int j = threadIdx.x; j < length; j += blockDim.x)
+    cached[j] = __half2float(row[j]);
+  __syncthreads();
+  float local_max = -1e30f;
+  for (int j = threadIdx.x; j < length; j += blockDim.x)
+    local_max = fmaxf(local_max, cached[j]);
+  shared[threadIdx.x] = local_max;
+  __syncthreads();
+  float maximum = -1e30f;
+  for (int i = 0; i < blockDim.x; ++i) maximum = fmaxf(maximum, shared[i]);
+  float local_sum = 0.0f;
+  for (int j = threadIdx.x; j < length; j += blockDim.x) {
+    const float p = __expf(cached[j] - maximum);
+    cached[j] = p;
+    local_sum += p;
+  }
+  shared[threadIdx.x] = local_sum;
+  __syncthreads();
+  float total = 0.0f;
+  for (int i = 0; i < blockDim.x; ++i) total += shared[i];
+  const float inv = 1.0f / total;
+  for (int j = threadIdx.x; j < length; j += blockDim.x)
+    row[j] = __float2half(cached[j] * inv);
+}
+
 const float kOneF32 = 1.0f;
 const float kZeroF32 = 0.0f;
 const half kZeroHalf = __float2half(0.0f);
@@ -1245,7 +1281,8 @@ EncodeOutput run_encode_batched(const std::vector<float>& mel_features, int chun
           head_stride, d_q_hm.get(), CUDA_R_16F, kHeadDim, head_stride,
           static_cast<const void*>(&kZeroF32), d_scores.get(), CUDA_R_16F, kFrames,
           score_stride, batch, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
-      softmax_rows_kernel<<<dim3(kFrames, batch), 256>>>(d_scores.get(), batch, kFrames);
+      softmax_rows_fused_kernel<<<dim3(kFrames, batch), 256,
+                                  kFrames * sizeof(float)>>>(d_scores.get(), batch, kFrames);
       CUDA_CHECK(cudaGetLastError());
       CUBLAS_CHECK(cublasGemmStridedBatchedEx(
           cublas.get(), CUBLAS_OP_N, CUBLAS_OP_N, kHeadDim, kFrames, kFrames,
