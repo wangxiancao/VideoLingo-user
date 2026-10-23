@@ -32,12 +32,16 @@ llm:
     # 1.7 GiB/replica, ~285 tok/s per replica). transformers: the BF16
     # FastAPI fallback (~4.3 GiB/replica, ~32 tok/s).
     runtime: 'llamacpp'
-    replicas: 2
+    replicas: 1
     gguf_path: '_model_cache/HY-MT2-1.8B-GGUF/Hy-MT2-1.8B-Q4_K_M.gguf'
     binary: 'native/llamacpp/llama.cpp/build/bin/llama-server'
     # Subtitle-serving context bound; the 262K default would pre-allocate
     # ~18 GiB of KV cache per replica.
     ctx: 4096
+    # Segments per LLM request for this runtime: the Q4 GGUF misses the
+    # ordered-array contract more often at larger batches on garbled ASR
+    # content; 1..2 measured best. transformers stays reliable at 12.
+    batch_segments: 1
     # transformers runtime weights (ignored when runtime is llamacpp)
     model_dir: '_model_cache/HY-MT2-1.8B'
     host: '127.0.0.1'

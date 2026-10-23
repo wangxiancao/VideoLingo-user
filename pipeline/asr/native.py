@@ -33,6 +33,30 @@ MAX_OVERRUN = 0.5
 DEFAULT_ENGINE_VRAM_BUDGET_MIB = 16384
 
 
+def _wait_for_vram_return(timeout_s=10.0):
+    """Block until driver-level free VRAM stabilizes (release handoff)."""
+
+    def free_mib():
+        try:
+            probe = subprocess.run(
+                ["nvidia-smi", "--query-gpu=memory.free",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=5, check=True,
+            )
+            return int(probe.stdout.strip().splitlines()[0])
+        except Exception:  # noqa: BLE001 - probe is best-effort
+            return None
+
+    deadline = time.time() + timeout_s
+    previous = free_mib()
+    while previous is not None and time.time() < deadline:
+        time.sleep(0.5)
+        current = free_mib()
+        if current is not None and current <= previous + 256:
+            return  # stable: the release has landed
+        previous = current
+
+
 def _engine_vram_budget_mib():
     """Cap the engine's VRAM reservation to what is actually free.
 
@@ -195,7 +219,12 @@ class NativeAsrBackend:
                       for index in indices]
             return _align_batch(aligner, arrays, batch_texts, aligner_language_name)
 
-        aligned = _batched_results(spoken, 20, align_batch, "alignment")
+        # Aligner batch is bounded to fit the 16 GiB pipeline-peak budget:
+        # b20 needs ~9.7 GiB reserved, which collides with the LLM replicas
+        # spawning right after the release (V4-7 O4 measured 16.4 GiB peak).
+        # b10 halves the footprint for ~2-3s more alignment time.
+        aligner_batch = 4
+        aligned = _batched_results(spoken, aligner_batch, align_batch, "alignment")
         segments = []
         for (index, text), timestamps in zip(spoken, aligned):
             offset = index * self.chunk_seconds
@@ -231,7 +260,10 @@ class NativeAsrBackend:
         )
         # Hand the GPU back before the LLM replicas load (V4-7 O2): the
         # aligner's torch cache would otherwise pin ~11 GiB of reserved
-        # memory through the translate stage.
+        # memory through the translate stage. Wait until driver-level free
+        # memory stabilizes, so replicas never spawn against a half-released
+        # card (measured: ~16.6 GiB transient peak without the wait vs the
+        # 16 GiB pipeline budget).
         del aligner
         import gc
         gc.collect()
@@ -240,4 +272,5 @@ class NativeAsrBackend:
             torch.cuda.empty_cache()
         except Exception:  # noqa: BLE001 - release is best-effort
             pass
+        _wait_for_vram_return()
         return Transcription(language=language_code, segments=tuple(segments))

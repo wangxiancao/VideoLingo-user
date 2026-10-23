@@ -20,6 +20,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -72,6 +73,7 @@ class _Replica:
         self._cwd = str(cwd) if cwd else None
         self._stub = stub
         self.process: subprocess.Popen | None = None
+        self._log_handle = None
 
     # -- validation -----------------------------------------------------
 
@@ -174,15 +176,22 @@ class _Replica:
         if self.process is not None:
             raise LlmError("replica already started")
         started = time.perf_counter()
+        # Logs go to a temp file, NOT a pipe: nobody drains the pipe during
+        # the run, and chatty servers (llama-server logs every request) fill
+        # the 64 KiB pipe buffer within minutes and deadlock the server.
+        # The file still serves the startup-failure tail below.
+        self._log_handle = tempfile.TemporaryFile(mode="w+", encoding="utf-8",
+                                                  errors="replace")
         self.process = subprocess.Popen(
             self._spawn_command(), cwd=self._cwd,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            stdout=self._log_handle, stderr=subprocess.STDOUT, text=True,
             start_new_session=True, env=self._spawn_env(),
         )
         deadline = started + self.startup_timeout_s
         while time.perf_counter() < deadline:
             if self.process.poll() is not None:
-                tail = (self.process.stdout.read() or "")[-800:]
+                self._log_handle.seek(0)
+                tail = (self._log_handle.read() or "")[-800:]
                 raise LlmError(
                     f"local llm replica exited during startup "
                     f"(code {self.process.returncode}): {tail.strip()}"
@@ -201,24 +210,28 @@ class _Replica:
         if process is None:
             return
         self.process = None
-        if process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                process.wait(timeout=TERM_WAIT_S)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                try:
-                    process.wait(timeout=KILL_WAIT_S)
-                except subprocess.TimeoutExpired:
+        try:
+            if process.poll() is None:
+                # llama-server ignores SIGTERM for graceful drain; there is
+                # nothing to drain between pipeline stages, escalate fast.
+                for sig, wait in ((signal.SIGINT, 2.0), (signal.SIGKILL, 5.0)):
+                    try:
+                        os.killpg(process.pid, sig)
+                    except ProcessLookupError:
+                        break
+                    try:
+                        process.wait(timeout=wait)
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
+                else:
                     raise LlmError(
                         f"local llm replica refused SIGKILL (pid {process.pid})"
-                    ) from None
+                    )
+        finally:
+            if self._log_handle is not None:
+                self._log_handle.close()
+                self._log_handle = None
 
     def is_running(self) -> bool:
         return self.process is not None and self.process.poll() is None
@@ -241,6 +254,7 @@ class LocalLlmService:
         gguf: str | Path | None = None,
         binary: str | Path | None = None,
         ctx: int = 4096,
+        batch_segments: int | None = None,
     ):
         if runtime not in ("transformers", "llamacpp"):
             raise ConfigError(
@@ -260,6 +274,12 @@ class LocalLlmService:
         self._common = dict(model_dir=model_dir, gguf=gguf, binary=binary,
                             ctx=ctx, python_exe=python_exe, cwd=cwd,
                             stub=stub, startup_timeout_s=startup_timeout_s)
+        # The Q4 llama runtime misses the ordered-array contract far more at
+        # large batches (garbled ASR content); the transformers runtime is
+        # reliable at 12. The stage asks the service for its batch size.
+        if batch_segments is None:
+            batch_segments = 1 if runtime == "llamacpp" else 12
+        self.batch_segments = max(1, int(batch_segments))
         self.startup_seconds: float | None = None
         self.shutdown_seconds: float | None = None
 
@@ -351,6 +371,7 @@ def start_local_llm_service(config) -> LocalLlmService:
         gguf=config.get("llm.local.gguf_path"),
         binary=config.get("llm.local.binary", DEFAULT_BINARY),
         ctx=int(config.get("llm.local.ctx", 4096)),
+        batch_segments=config.get("llm.local.batch_segments"),
         model_dir=config.get("llm.local.model_dir", "_model_cache/HY-MT2-1.8B"),
         host=config.get("llm.local.host", "127.0.0.1"),
         port=config.get("llm.local.port", 0),
