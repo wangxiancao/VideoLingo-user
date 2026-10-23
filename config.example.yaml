@@ -86,6 +86,13 @@ asr:
 # Whether to burn subtitles into the video
 burn_subtitles: true
 
+# New-pipeline burn settings: libx264 (default, CPU) or h264_nvenc (GPU,
+# SSIM parity 0.9997 on the V4-7 O3 gate sample), plus keyframe-cut
+# parallel burning (chunks 1..8; 4 gives ~3x on a 2880x1800 60-min video).
+burn:
+  encoder: 'libx264'
+  chunks: 4
+
 ## ======================== Advanced Settings ======================== ##
 # *🔬 h264_nvenc GPU acceleration for ffmpeg, make sure your GPU supports it
 ffmpeg_gpu: false
