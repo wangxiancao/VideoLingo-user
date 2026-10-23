@@ -3,7 +3,32 @@
   "responses": [
     {
       "translations": [
-        {"id": 1, "target": "只有第一句。"}
+        "只有第一句。"
+      ]
+    },
+    {
+      "translations": [
+        "只有第一句。"
+      ]
+    },
+    {
+      "translations": [
+        "第一句直译。"
+      ]
+    },
+    {
+      "translations": [
+        "第一句润色。"
+      ]
+    },
+    {
+      "translations": [
+        "第二句直译。"
+      ]
+    },
+    {
+      "translations": [
+        "第二句润色。"
       ]
     }
   ]

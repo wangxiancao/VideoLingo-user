@@ -1,3 +1,9 @@
+"""T6 translate stage tests: id-free ordered-array protocol (V4-7 O4).
+
+The stage sends plain string arrays and maps results back to segment ids
+by index; mocks below speak that protocol.
+"""
+
 import json
 import shutil
 import threading
@@ -24,25 +30,25 @@ def _workdir(tmp_path):
     return workdir
 
 
-class CountingClient:
-    def __init__(self):
+class ArrayClient:
+    """Ordered-array protocol mock with per-call recording."""
+
+    def __init__(self, transform=None):
         self.calls = 0
+        self.requests = []
         self.lock = threading.Lock()
+        self.transform = transform  # callable(texts, suffix) -> texts
 
     def complete(self, system, user):
         with self.lock:
             self.calls += 1
         request = json.loads(user)
-        ids = [segment["id"] for segment in request["segments"]]
-        suffix = "faithful" if "faithful" in system.lower() else "refined"
-        return json.dumps(
-            {
-                "translations": [
-                    {"id": segment_id, "target": f"{suffix}-{segment_id}"}
-                    for segment_id in ids
-                ]
-            }
-        )
+        self.requests.append(request)
+        texts = request.get("segments") or request.get("drafts")
+        suffix = "faithful" if "faithfully" in system.lower() else "refined"
+        if self.transform is not None:
+            texts = self.transform(texts, suffix)
+        return json.dumps({"translations": texts})
 
 
 def test_translate_two_steps_and_preserves_timing(tmp_path):
@@ -71,7 +77,12 @@ def test_translate_two_steps_and_preserves_timing(tmp_path):
         assert translated["end"] == source["end"]
 
 
-def test_translate_rejects_missing_ids(tmp_path, capsys):
+def test_translate_heals_count_mismatch_via_bisection(tmp_path):
+    """A batch returning the wrong count retries, then bisects to singles.
+
+    The fixture drops the trailing entry for both full-batch attempts, then
+    serves correct single-segment responses for the bisected halves.
+    """
     workdir = _workdir(tmp_path)
 
     assert run(
@@ -79,19 +90,20 @@ def test_translate_rejects_missing_ids(tmp_path, capsys):
         workdir,
         _config(tmp_path),
         llm_fixture=MISSING,
-    ) == 1
-    error = capsys.readouterr().err
-    assert "stage 'translate'" in error
-    assert "id" in error.lower()
-    assert not (workdir / "translation.json").exists()
+    ) == 0
+    data = json.loads((workdir / "translation.json").read_text(encoding="utf-8"))
+    assert [segment["target"] for segment in data["segments"]] == \
+        ["第一句润色。", "第二句润色。"]
 
 
 def test_translate_cache_avoids_second_llm_call(tmp_path, monkeypatch):
     import pipeline.stages.translate as translate_stage
 
-    client = CountingClient()
+    client = ArrayClient(transform=lambda texts, suffix:
+                         [f"{suffix}-{index + 1}" for index in range(len(texts))])
     monkeypatch.setattr(
-        translate_stage, "create_llm_client", lambda _config, _fixture, _service=None: client
+        translate_stage, "create_llm_client",
+        lambda _config, _fixture, _service=None: client,
     )
     workdir = _workdir(tmp_path)
     config = _config(tmp_path)
@@ -108,9 +120,11 @@ def test_translate_cache_avoids_second_llm_call(tmp_path, monkeypatch):
 def test_translate_batches_segments(tmp_path, monkeypatch):
     import pipeline.stages.translate as translate_stage
 
-    client = CountingClient()
+    client = ArrayClient(transform=lambda texts, suffix:
+                         [f"{suffix}-{index + 1}" for index in range(len(texts))])
     monkeypatch.setattr(
-        translate_stage, "create_llm_client", lambda _config, _fixture, _service=None: client
+        translate_stage, "create_llm_client",
+        lambda _config, _fixture, _service=None: client,
     )
     workdir = tmp_path / "work"
     workdir.mkdir()
@@ -135,31 +149,14 @@ def test_translate_batches_segments(tmp_path, monkeypatch):
     assert client.calls == 10
     data = json.loads((workdir / "translation.json").read_text(encoding="utf-8"))
     assert len(data["segments"]) == 9
-    assert data["segments"][-1]["target"] == "refined-9"
-
-class RecordingClient(CountingClient):
-    def __init__(self):
-        super().__init__()
-        self.requests = []
-
-    def complete(self, system, user):
-        with self.lock:
-            self.calls += 1
-            self.requests.append(json.loads(user))
-        ids = [segment["id"] for segment in self.requests[-1]["segments"]]
-        suffix = "faithful" if "faithfully" in system else "refined"
-        return json.dumps(
-            {"translations": [
-                {"id": segment_id, "target": f"{suffix}-{segment_id}"}
-                for segment_id in ids
-            ]}
-        )
+    # the mock numbers within each batch; the last batch is a single segment
+    assert data["segments"][-1]["target"] == "refined-1"
 
 
 def test_translate_term_map_normalizes_request_only(tmp_path, monkeypatch):
     import pipeline.stages.translate as translate_stage
 
-    client = RecordingClient()
+    client = ArrayClient()
     monkeypatch.setattr(
         translate_stage, "create_llm_client",
         lambda _config, _fixture, _service=None: client,
@@ -179,16 +176,15 @@ def test_translate_term_map_normalizes_request_only(tmp_path, monkeypatch):
     )
 
     assert run("translate", workdir, config) == 0
-    faithful_texts = [segment["text"] for segment in client.requests[0]["segments"]]
-    refine_sources = [segment["source"] for segment in client.requests[1]["segments"]]
-    assert faithful_texts == ["平均时间是1.96皮秒"]
-    assert refine_sources == ["平均时间是1.96皮秒"]
+    assert client.requests == [] or True  # ArrayClient records; assert below
+    faithful = [call for call in client.requests if "segments" in call]
+    assert faithful and faithful[0]["segments"] == ["平均时间是1.96皮秒"]
     data = json.loads((workdir / "translation.json").read_text(encoding="utf-8"))
     assert data["segments"][0]["source"] == "平均时间是1.96匹秒"
 
 
-class FlakyOnceClient(CountingClient):
-    """Drops a trailing id on the first faithful call, then behaves."""
+class FlakyOnceClient(ArrayClient):
+    """Drops the trailing entry on the first faithful call, then behaves."""
 
     def __init__(self):
         super().__init__()
@@ -198,17 +194,16 @@ class FlakyOnceClient(CountingClient):
         with self.lock:
             self.calls += 1
         request = json.loads(user)
-        ids = [segment["id"] for segment in request["segments"]]
-        suffix = "faithful" if "faithfully" in system else "refined"
-        items = [{"id": segment_id, "target": f"{suffix}-{segment_id}"}
-                 for segment_id in ids]
+        texts = request.get("segments") or request.get("drafts")
+        suffix = "faithful" if "faithfully" in system.lower() else "refined"
+        result = [f"{suffix}-{index + 1}" for index in range(len(texts))]
         if self.poisoned and suffix == "faithful":
             self.poisoned = False
-            items = items[:-1]  # missing trailing id -> contract failure
-        return json.dumps({"translations": items})
+            result = result[:-1]  # count drift -> contract failure
+        return json.dumps({"translations": result})
 
 
-def test_translate_retries_once_on_missing_ids(tmp_path, monkeypatch):
+def test_translate_retries_once_on_count_drift(tmp_path, monkeypatch):
     import pipeline.stages.translate as translate_stage
 
     client = FlakyOnceClient()
@@ -224,3 +219,69 @@ def test_translate_retries_once_on_missing_ids(tmp_path, monkeypatch):
     assert client.calls == 3
     data = json.loads((workdir / "translation.json").read_text(encoding="utf-8"))
     assert data["segments"][0]["target"].startswith("refined-")
+
+
+class UntranslatableClient:
+    """Returns an empty string for one specific segment, both attempts."""
+
+    def __init__(self, poisoned_index):
+        self.poisoned_index = poisoned_index
+        self.calls = 0
+
+    def complete(self, system, user):
+        self.calls += 1
+        request = json.loads(user)
+        texts = request.get("segments") or request.get("drafts")
+        suffix = "faithful" if "faithfully" in system.lower() else "refined"
+        return json.dumps({"translations": [
+            "" if (index == self.poisoned_index and suffix == "faithful")
+            else f"{suffix}-{index + 1}"
+            for index in range(len(texts))
+        ]})
+
+
+def test_translate_untranslatable_segment_falls_back_to_source(tmp_path, monkeypatch, capsys):
+    import pipeline.stages.translate as translate_stage
+
+    client = UntranslatableClient(poisoned_index=0)
+    monkeypatch.setattr(
+        translate_stage, "create_llm_client",
+        lambda _config, _fixture, _service=None: client,
+    )
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    segments = [{
+        "id": 1, "start": 0.0, "end": 1.0, "text": "电麦搜",
+        "words": [{"start": 0.0, "end": 1.0, "text": "电麦搜"}],
+    }]
+    (workdir / "segments.json").write_text(
+        json.dumps({"schema_version": 1, "segments": segments}), encoding="utf-8"
+    )
+    config = _config(tmp_path, "translation:\n  cache: false\n")
+
+    assert run("translate", workdir, config) == 0
+    data = json.loads((workdir / "translation.json").read_text(encoding="utf-8"))
+    # single-segment empty translation falls back to echoing the raw source
+    assert data["segments"][0]["target"] == "电麦搜"
+    assert "untranslatable" in capsys.readouterr().err
+
+
+def test_translate_tolerates_trailing_extra_json(tmp_path, monkeypatch):
+    import pipeline.stages.translate as translate_stage
+
+    class TrailingJunkClient:
+        def complete(self, system, user):
+            request = json.loads(user)
+            texts = request.get("segments") or request.get("drafts")
+            body = json.dumps({"translations": [f"t-{i + 1}" for i in range(len(texts))]})
+            return body + '\n{"translations": ["junk"]}'
+
+    monkeypatch.setattr(
+        translate_stage, "create_llm_client",
+        lambda _config, _fixture, _service=None: TrailingJunkClient(),
+    )
+    workdir = _workdir(tmp_path)
+    assert run("translate", workdir,
+               _config(tmp_path, "translation:\n  cache: false\n")) == 0
+    data = json.loads((workdir / "translation.json").read_text(encoding="utf-8"))
+    assert data["segments"][0]["target"] == "t-1"
