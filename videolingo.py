@@ -7,10 +7,8 @@ segmentation) runs without hand-editing config:
     python videolingo.py /path/to/video.mp4
     python videolingo.py /path/to/video.mp4 --workdir runs/demo --stages ingest,transcribe
 
-The legacy orchestration stays available as the explicit fallback:
-
-    python translate_video.py /path/to/video.mp4     # old core pipeline
-    streamlit run st.py                              # old Streamlit UI
+The legacy orchestration has been retired; the last commit that carried it
+is tagged legacy-core-last (checkout that tag to restore it).
 
 Artifacts land in the workdir (transcript/segments/translation JSON,
 subs/*.srt, output.mp4); the workdir is resumable per stage.
@@ -45,13 +43,13 @@ def main(argv=None) -> int:
     )
     parser.add_argument(
         "--legacy-hint", action="store_true",
-        help="print the legacy fallback commands instead of running",
+        help="print how to restore the retired legacy pipeline (git tag)",
     )
     args = parser.parse_args(argv)
 
     if args.legacy_hint:
-        print("legacy fallback:\n  python translate_video.py <video>\n"
-              "  streamlit run st.py")
+        print("legacy pipeline retired; restore with:\n"
+              "  git checkout legacy-core-last")
         return 0
 
     workdir = args.workdir or Path("runs") / Path(args.source).stem
