@@ -12,12 +12,12 @@ VideoLingo 是一个的视频转录、翻译、字幕与配音应用。Streamlit
 
 - **`docs/agents/execution-chain.md`** — 动态流程：文件驱动的数据流、并存的三套阶段编号、跨阶段契约（路径、表格列、SRT 集合、时间戳格式、`log_title` 缓存键）、当前的幂等实况、门控点、三个入口之间的差异，以及当前阻碍把阶段拆成独立进程的因素。
 
-顶层：`st.py` 与 `translate_video.py` 是两个入口；`core/_1_*.py`–`core/_12_*.py` 是 15 个有序阶段模块；`core/{utils,asr_backend,tts_backend,spacy_utils,st_utils}/` 存放共享代码；`translations/` 存放 7 份 UI locale JSON；`config.example.yaml` 是被跟踪的 schema，而 `config.yaml` 可变、被忽略、可能含密钥；`docs/` 是独立的 pnpm/Next.js 站点。
+顶层：**默认入口是 `videolingo.py`**（薄封装，跑新六阶段管线 `pipeline/`：ingest→transcribe→segment→translate→subtitle→burn，产物落 `runs/<name>/`，`runs/` 被忽略）；旧管线的 `st.py`（Streamlit）与 `translate_video.py`（CLI）保留为**显式回退入口**，走 `core/_1_*.py`–`core/_12_*.py` 的 15 个有序阶段模块与 `output/`；`core/{utils,asr_backend,tts_backend,spacy_utils,st_utils}/` 存放旧管线共享代码；`translations/` 存放 7 份 UI locale JSON；`config.example.yaml` 是被跟踪的 schema（新管线默认自包含本地栈：native ASR 引擎 + 托管 HY-MT2 LLM），而 `config.yaml` 可变、被忽略、可能含密钥；`docs/` 是独立的 pnpm/Next.js 站点。
 
 ## 开发流程
 
 1. 改动产物路径、表格列、时间戳、排序规则或函数签名之前，先追清它的生产者与消费者；从 `docs/agents/execution-chain.md` 入手。
-2. 旧管线保持阶段顺序和两个入口；新 pipeline 的阶段级 runner 是验证入口，切换前两者并存。
+2. 新管线（`pipeline/`）是默认路径（T9a 已切换）；旧管线保持阶段顺序和两个回退入口不动，直到 T9 后的独立下线里程碑。两套管线并存期间不要混用工作目录（新 `runs/`、旧 `output/`）。
 3. 不要在同一份 checkout 里并发跑流水线。它们共享 `output/` 和 `config.yaml`，而 YAML 锁只在进程内有效。
 4. 新配置键加到 `config.example.yaml`。旧阶段通过 `load_key`/`update_key` 访问；新 pipeline 只通过薄包装读取 `--config`，运行期不写 `config.yaml`。无关工作中不要覆盖本地 `config.yaml`。
 5. 改动保持聚焦。汇报受影响的阶段、验证证据，以及任何未测试的模型、GPU、API 或依赖媒体文件的路径。
@@ -33,16 +33,16 @@ VideoLingo 是一个的视频转录、翻译、字幕与配音应用。Streamlit
 
 ## 测试说明
 
-仓库没有测试套件，也没有 CI workflow——旧的 `tests/` 测试套件已随 IndexTTS2/CosyVoice3 删除，当前只有 `tests/fixtures/` 的夹具约定。重构期间按 `docs/agents/verification.md` 做阶段级验证；下面的 CLI/Streamlit 全流程命令只适用于旧管线或切换后的最终验收。可行时为确定性解析、对齐、配置或计时逻辑补聚焦测试。
+`tests/` 已重建聚焦测试套件（runner/stages/llm 生命周期等，`.venv/bin/python -m pytest tests/ -q`；GPU/模型相关的会按资产缺失自动跳过）。阶段级验证按 `docs/agents/verification.md`；旧管线的 CLI/Streamlit 全流程命令只适用于回退路径或对照。
 
-- Python：`.venv/bin/python -m compileall -q core st.py translate_video.py`
-- 字幕流水线：`.venv/bin/python translate_video.py <disposable-sample>`
-- 配音流水线：`--mode tts` 当前不可用，唯一的后端 `custom_tts` 仍是空实现
-- Streamlit：`streamlit run st.py`，并实际操作受影响的那个 section
+- Python：`.venv/bin/python -m compileall -q core st.py translate_video.py videolingo.py pipeline`
+- 默认入口（新管线）：`.venv/bin/python videolingo.py <video-or-url>`（产物落 `runs/`；阶段可 `--stages` 选择）
+- 回退入口（旧管线）：`.venv/bin/python translate_video.py <disposable-sample>`；`--mode tts` 仍不可用（`custom_tts` 空实现）
+- Streamlit（旧管线）：`streamlit run st.py`，并实际操作受影响的那个 section
 - 文档：`cd docs && pnpm build`
 - 翻译：核对各 locale JSON 的键集合完全一致
 
-CLI 在处理前会递归替换 `output/`。其他入口路径在哨兵产物存在时可能跳过阶段，LLM 调用也可能复用缓存响应；重跑不等于干净重算。缺少所需服务与资产时，绝不声称端到端成功。
+新管线按产物存在性跳过已完成阶段、翻译缓存默认开启——重跑不等于干净重算。旧 CLI 在处理前会递归替换 `output/`。缺少所需服务与资产时，绝不声称端到端成功。
 
 ## 环境搭建
 

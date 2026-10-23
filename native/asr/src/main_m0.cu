@@ -339,6 +339,7 @@ int run_transcribe(int argc, char** argv) {
   bool prefill_batched = true;
   int max_new_tokens = 256;
   int chunks = 1;
+  uint64_t max_vram_mib = 16384;
   for (int i = 2; i < argc; ++i) {
     const std::string arg = argv[i];
     const auto next_value = [&]() -> std::string {
@@ -348,6 +349,14 @@ int run_transcribe(int argc, char** argv) {
     if (arg == "--model-dir") model_dir = next_value();
     else if (arg == "--pcm") pcm_path = next_value();
     else if (arg == "--prompt-ids") prompt_path = next_value();
+    else if (arg == "--max-vram-mib") {
+      const std::string value = next_value();
+      char* end = nullptr;
+      const unsigned long long parsed = std::strtoull(value.c_str(), &end, 10);
+      if (value.empty() || !end || *end != '\0' || parsed == 0 || parsed > (1ull << 22))
+        throw InvalidInput("--max-vram-mib is out of range: " + value);
+      max_vram_mib = parsed;
+    }
     else if (arg == "--gemm-acc") {
       const std::string value = next_value();
       if (value == "16") fp16_accumulate = true;
@@ -403,7 +412,7 @@ int run_transcribe(int argc, char** argv) {
     for (int i = 0; i < chunks; ++i) pcm.insert(pcm.end(), single.begin(), single.end());
   }
   const MelOutput mel = compute_mel_batched(pcm, chunks);
-  DeviceWeights weights = load_weights_resident(model_dir, 16384ull * 1024 * 1024);
+  DeviceWeights weights = load_weights_resident(model_dir, max_vram_mib * 1024 * 1024);
 
   DecodeOptions decode_options;
   decode_options.fp16_accumulate = fp16_accumulate;

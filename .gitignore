@@ -195,3 +195,6 @@ queue_logs/
 # third-party reference checkouts
 external/video-miner/
 /bench/results/native-asr-m1/
+
+# default entry workdirs (new pipeline)
+/runs/
