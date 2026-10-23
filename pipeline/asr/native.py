@@ -229,4 +229,15 @@ class NativeAsrBackend:
             f"elapsed={elapsed:.2f}s",
             file=sys.stderr,
         )
+        # Hand the GPU back before the LLM replicas load (V4-7 O2): the
+        # aligner's torch cache would otherwise pin ~11 GiB of reserved
+        # memory through the translate stage.
+        del aligner
+        import gc
+        gc.collect()
+        try:
+            import torch
+            torch.cuda.empty_cache()
+        except Exception:  # noqa: BLE001 - release is best-effort
+            pass
         return Transcription(language=language_code, segments=tuple(segments))
