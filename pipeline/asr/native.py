@@ -30,6 +30,29 @@ from pipeline.contracts import StageError
 MODEL_ID = "ZhipuAI/GLM-ASR-Nano-2512"
 EOS_IDS = (59246, 59253, 59255)
 MAX_OVERRUN = 0.5
+DEFAULT_ENGINE_VRAM_BUDGET_MIB = 16384
+
+
+def _engine_vram_budget_mib():
+    """Cap the engine's VRAM reservation to what is actually free.
+
+    The engine eagerly allocates arenas up to its budget; on a shared GPU
+    (e.g. an infinity_emb tenant) the default 16 GiB cap OOMs. Query free
+    memory, keep a 1 GiB margin for the engine's own runtime overhead
+    beyond its estimate (the aligner and the LLM service only load after
+    the engine subprocess has exited, so they need no margin here), and
+    never go below a floor that still fits weights plus a small batch.
+    On probe failure, keep the exclusive-GPU default.
+    """
+    try:
+        probe = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10, check=True,
+        )
+        free_mib = int(probe.stdout.strip().splitlines()[0])
+    except Exception:  # noqa: BLE001 - probe is best-effort
+        return DEFAULT_ENGINE_VRAM_BUDGET_MIB
+    return max(2048, min(DEFAULT_ENGINE_VRAM_BUDGET_MIB, free_mib - 1024))
 
 
 class _AlignerOnly:
@@ -125,7 +148,8 @@ class NativeAsrBackend:
 
             run = subprocess.run(
                 [str(self.binary), "transcribe", "--model-dir", str(self.model_dir),
-                 "--pcm-long", str(pcm_path), "--prompt-ids", str(prompt_path)],
+                 "--pcm-long", str(pcm_path), "--prompt-ids", str(prompt_path),
+                 "--max-vram-mib", str(_engine_vram_budget_mib())],
                 capture_output=True, text=True, timeout=7200,
             )
             if run.returncode != 0:

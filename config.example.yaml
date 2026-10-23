@@ -25,7 +25,9 @@ max_workers: 4
 # *segment and stops after translate in every run; there is no cloud fallback.
 llm:
   local:
-    enabled: false
+    # Default ON: the product mandate is a self-contained local stack with no
+    # cloud API key (spec v0.4). Set false to fall back to api.* above.
+    enabled: true
     # *HY-MT2-1.8B weights (BF16 safetensors). Downloaded once; never at runtime.
     model_dir: '_model_cache/HY-MT2-1.8B'
     host: '127.0.0.1'
@@ -54,17 +56,18 @@ whisper:
 
 # New pipeline ASR settings (GLM-ASR + Qwen3-ForcedAligner)
 asr:
-  # glm_asr (transformers/BF16, default) or glm_asr_native (self-developed CUDA engine)
-  backend: glm_asr
-  # native_binary: native/asr/build/glm_asr_m0   # engine binary for glm_asr_native
-  # Only 'glm_asr' is implemented; unknown values fail explicitly
-  backend: 'glm_asr'
+  # Default: glm_asr_native (self-developed CUDA engine; needs the built
+  # binary below and runs 3.7x faster than transformers). glm_asr is the
+  # transformers/BF16 reference path — same transcript contract, no binary
+  # required. Unknown values fail explicitly.
+  backend: 'glm_asr_native'
+  native_binary: 'native/asr/build/glm_asr_m0'
   # 'auto' detects zh/en/ja/ko/ru from the transcript; set an ISO code to override
   language: 'auto'
   # Audio chunk length in seconds; ForcedAligner accepts chunks well under 5 minutes
   chunk_seconds: 30
-  # Chunks per ASR/alignment batch; 20 fits 24 GB and gives the best throughput
-  # The stage halves the batch automatically on CUDA OOM
+  # Chunks per ASR/alignment batch (glm_asr only); 20 fits 24 GB with the
+  # best throughput. The stage halves the batch automatically on CUDA OOM.
   batch_size: 20
   max_new_tokens: 512
   # ModelScope cache containing both models; weights stay outside the repository
