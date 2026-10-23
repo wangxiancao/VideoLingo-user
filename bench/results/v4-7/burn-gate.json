@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "tool": "v4_7_burn_gate",
+  "source": "/tmp/o3-sample.mp4",
+  "libx264": {
+    "encoder": "libx264",
+    "wall_s": 45.4,
+    "bytes": 15362297
+  },
+  "h264_nvenc": {
+    "encoder": "h264_nvenc",
+    "wall_s": 50.4,
+    "bytes": 21299997
+  },
+  "ssim_vs_x264": 0.999724,
+  "ssim_floor": 0.98,
+  "speedup": 0.9,
+  "pass": true
+}

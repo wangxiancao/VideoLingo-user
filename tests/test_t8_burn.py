@@ -72,3 +72,29 @@ def test_burn_rejects_corrupt_video_without_output(tmp_path, capsys):
     assert "stage 'burn'" in error
     assert "ffprobe" in error.lower() or "cannot read" in error.lower()
     assert not (workdir / "output.mp4").exists()
+
+def test_encoder_args_shapes():
+    from pipeline.stages.burn import _encoder_args
+
+    assert _encoder_args({}) == ["-c:v", "libx264", "-preset", "veryfast",
+                                 "-crf", "18"]
+    nvenc = _encoder_args({"burn.encoder": "h264_nvenc"})
+    assert nvenc[0:2] == ["-c:v", "h264_nvenc"] and "-cq" in nvenc
+    import pytest as _pytest
+    from pipeline.contracts import StageError
+    with _pytest.raises(StageError, match="burn.encoder"):
+        _encoder_args({"burn.encoder": "vpx"})
+
+
+def test_chunk_count_bounds_and_short_video():
+    from pipeline.stages.burn import _chunk_count
+
+    assert _chunk_count({}, 3600) == 1
+    assert _chunk_count({"burn.chunks": 4}, 3600) == 4
+    # short video: never more chunks than 30s spans
+    assert _chunk_count({"burn.chunks": 4}, 90) == 3
+    assert _chunk_count({"burn.chunks": 8}, 60) == 2
+    from pipeline.contracts import StageError
+    import pytest as _pytest
+    with _pytest.raises(StageError, match="burn.chunks"):
+        _chunk_count({"burn.chunks": 9}, 3600)
