@@ -24,7 +24,8 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, ".")
-from pipeline.stages.segment import SYSTEM_PROMPT as SEGMENT_ORIG  # noqa: E402
+# NOTE: the segment stage moved to deterministic rules in V4-3 and no longer
+# has a system prompt; this spike keeps only the translate prompts below.
 from pipeline.stages.translate import (  # noqa: E402
     SYSTEM_FAITHFUL as FAITHFUL_ORIG,
     SYSTEM_REFINE as REFINE_ORIG,
@@ -255,7 +256,7 @@ def main():
              "words": [{"index": i, "text": t} for i, t in enumerate(sample_words)]},
             ensure_ascii=False)
         report["segment_contract"] = {}
-        for tag, system in (("orig", SEGMENT_ORIG), ("v2", SEGMENT_V2)):
+        for tag, system in (("v2", SEGMENT_V2),):
             response = post_chat(base_url, system, seg_request)
             content = response["choices"][0]["message"]["content"]
             outputs.append((f"segment_{tag}", content))

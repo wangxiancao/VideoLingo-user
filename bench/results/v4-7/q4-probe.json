@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "tool": "v4_7_q4_probe",
+  "zh_lines": [
+    "请不吝点赞订阅转发打赏支持明镜与点点栏目这个是我上周统计的香毒素水溶液和香毒素甲醇溶液分别统计了他们这个溶剂",
+    "就是有溶剂重排发生这个外层的溶剂入侵所发生的这个时间的情况然后横坐标就是第一次次有有外层的溶剂进入呃取代了取",
+    "代了最近的那个溶剂之后的呃的时间然后横坐标是它的那个助长度发生的就是轨迹数发生的次数然后这里的平均对于水溶液",
+    "来说的话就是发生这个外层的水进入内层的平均时间是1.96匹秒然后对于甲醇溶液来说的话发生的这个时间是3.25",
+    "匹秒那么对于这个甲醇水溶液水溶液和甲醇液来说的话那我们的模拟时间应该就是它模拟的时间长度应该是不同的那么水的",
+    "话就是放在两匹秒甲醇的话应该放在应该延长到四匹秒这样的话整体来说比较的合适四匹秒这个是怎么看的你这个你是不是",
+    "应该以我想想以比较小的比较少的交换时间为参照还是你选平均值了比较少的也可以按你现在的标准选大概有多少轨迹会出",
+    "现交换请不吝点赞订阅不到百分之四十吧请不吝点赞订阅打赏支持明镜与点点栏目不到百分之四十吧百分之四十你",
+    "如果是按百分之十能接到的是是多长时间呢什么百分之就发生交换交换发生比例小于百分之请不吝点赞订阅那我需要统计",
+    "一下你大概估计一下你看这个图看这个图的话应该是50条轨迹总共应该是200条轨迹共是200条轨迹14分之1",
+    "你现在选的是两匹苗四匹苗什么你现在模拟模拟是要选多长水的话是两匹苗两",
+    "匹苗都是两匹苗现在都是两匹苗对嗯诶,可以,那先用两批秒DMSO呢?"
+  ],
+  "en_lines": [
+    "We need to talk about what happened yesterday.",
+    "The engine overheats when you push it past eighty.",
+    "She said she'd call back before the meeting starts.",
+    "This is the last train to Stockholm tonight.",
+    "I've been working on this for three months straight.",
+    "Turn left at the second traffic light, then go straight.",
+    "The report says global shipments dropped by twelve percent.",
+    "Are you sure you locked the door before we left?",
+    "My grandmother used to make dumplings every Sunday.",
+    "In this episode we'll visit the old harbor district.",
+    "The doctor recommended surgery within two weeks.",
+    "Nobody expected the storm to arrive so early."
+  ],
+  "q4": {
+    "matrix": {
+      "zh_en": {
+        "ok": true,
+        "ids_complete": true,
+        "all_targets_nonempty": true,
+        "extra_keys": [],
+        "timing": {
+          "wall_s": 1.76,
+          "completion_tokens": 499,
+          "tok_per_s": 283.5
+        }
+      },
+      "en_zh": {
+        "ok": true,
+        "ids_complete": true,
+        "all_targets_nonempty": true,
+        "extra_keys": [],
+        "timing": {
+          "wall_s": 0.79,
+          "completion_tokens": 214,
+          "tok_per_s": 271.1
+        }
+      },
+      "refine_zh_en": {
+        "ok": true,
+        "ids_complete": true,
+        "all_targets_nonempty": true,
+        "extra_keys": []
+      }
+    },
+    "throughput": {
+      "tok_per_s_median": 284.95,
+      "wall_s_median_12seg": 1.781,
+      "runs": [
+        288.0,
+        282.8,
+        284.5,
+        285.4,
+        283.8,
+        285.9
+      ]
+    }
+  },
+  "q4_outputs": {
+    "faithful_zh_en": "{\"translations\":[{\"id\":1,\"target\":\"Please generously like, subscribe, share, and support the Mingjing and Diandian section. This is the statistics I counted last week for the fragrance toxin aqueous solution and the fragrance toxin methanol solution, which include their solvents.\"},{\"id\":2,\"target\":\"There is a solvent rearrangement occurring, and the outer solvent invades, resulting in this situation. The horizontal axis represents the first time when the outer solvent enters and replaces the original solvent.\"},{\"id\":3,\"target\":\"After the recent solvent replacement, the horizontal axis shows the length of the trajectory, which is the number of occurrences. The average for the aqueous solution is...\"},{\"id\":4,\"target\":\"In terms of the outer water entering the inner layer, the average time is 1.96 seconds. For the methanol solution, the time is 3.25 seconds.\"},{\"id\":5,\"target\":\"So, for the methanol aqueous solution and methanol liquid, our simulation time should be different. The water...\"},{\"id\":6,\"target\":\"The time for methanol should be extended to 4 seconds. Overall, 4 seconds is more appropriate. How do you see this? Are you...\"},{\"id\":7,\"target\":\"Should we refer to a relatively small and less exchange time, or choose the average? You can also select based on your current standard. Approximately how many trajectories will occur?\"},{\"id\":8,\"target\":\"Please generously like, subscribe, and support the Mingjing and Diandian section. Less than 40% should be enough. Less than 40%...\"},{\"id\":9,\"target\":\"If we calculate based on 10%, how long is the time for exchange? The exchange ratio is less than 10%. Please generously like, subscribe, and support the Mingjing and Diandian section. I need to count...\"},{\"id\":10,\"target\":\"Please estimate roughly. Based on this graph, there should be about 50 trajectories in total, which is 1/14 of 200 trajectories.\"},{\"id\":11,\"target\":\"The time you selected is 2 seconds and 4 seconds. What should you choose for the simulation? The water time is 2 seconds.\"},{\"id\":12,\"target\":\"Both are 2 seconds. Okay, let's use 2 seconds for DMSO for now.\"}]}",
+    "faithful_en_zh": "{\"translations\":[{\"id\":1,\"target\":\"我们需要谈谈昨天发生的事情。\"},{\"id\":2,\"target\":\"当你将引擎推过八十时，它过热了。\"},{\"id\":3,\"target\":\"她说会在会议开始前回电话。\"},{\"id\":4,\"target\":\"今晚这是前往斯德哥尔摩的最后一班火车。\"},{\"id\":5,\"target\":\"我连续三个月都在做这件事。\"},{\"id\":6,\"target\":\"在第二个交通灯处左转，然后直行。\"},{\"id\":7,\"target\":\"报告称全球运输量下降了十二百分比。\"},{\"id\":8,\"target\":\"我们离开前你确定锁好门了吗？\"},{\"id\":9,\"target\":\"我的祖母过去每个星期天都会做饺子。\"},{\"id\":10,\"target\":\"在这一集中，我们将参观旧港口区。\"},{\"id\":11,\"target\":\"医生建议在两周内进行手术。\"},{\"id\":12,\"target\":\"没人预料到风暴会这么早到来。\"}]}",
+    "refine_zh_en": "{\"translations\":[{\"id\":1,\"target\":\"Please generously like, subscribe, share, and support the Mingjing and Diandian section. This is the statistics I counted last week for the fragrance toxin aqueous solution and the fragrance toxin methanol solution, which include their solvents.\"},{\"id\":2,\"target\":\"There is a solvent rearrangement occurring, and the outer solvent invades, resulting in this situation. The horizontal axis represents the first time when the outer solvent enters and replaces the original solvent.\"},{\"id\":3,\"target\":\"After the recent solvent replacement, the horizontal axis shows the length of the trajectory, which is the number of occurrences. The average for the aqueous solution is...\"},{\"id\":4,\"target\":\"In terms of the outer water entering the inner layer, the average time is 1.96 seconds. For the methanol solution, the time is 3.25 seconds.\"},{\"id\":5,\"target\":\"So, for the methanol aqueous solution and methanol liquid, our simulation time should be different. The water...\"},{\"id\":6,\"target\":\"The time for methanol should be extended to 4 seconds. Overall, 4 seconds is more appropriate. How do you see this? Are you...\"},{\"id\":7,\"target\":\"Should we refer to a relatively small and less exchange time, or choose the average? You can also select based on your current standard. Approximately how many trajectories will occur?\"},{\"id\":8,\"target\":\"Please generously like, subscribe, and support the Mingjing and Diandian section. Less than 40% should be enough. Less than 40%...\"},{\"id\":9,\"target\":\"If we calculate based on 10%, how long is the time for exchange? The exchange ratio is less than 10%. Please generously like, subscribe, and support the Mingjing and Diandian section. I need to count...\"},{\"id\":10,\"target\":\"Please estimate roughly. Based on this graph, there should be about 50 trajectories in total, which is 1/14 of 200 trajectories.\"},{\"id\":11,\"target\":\"The time you selected is 2 seconds and 4 seconds. What should you choose for the simulation? The water time is 2 seconds.\"},{\"id\":12,\"target\":\"Both are 2 seconds. Okay, let's use 2 seconds for DMSO for now.\"}]}"
+  },
+  "bf16": {
+    "matrix": {
+      "zh_en": {
+        "ok": true,
+        "ids_complete": true,
+        "all_targets_nonempty": true,
+        "extra_keys": [],
+        "timing": {
+          "wall_s": 15.849,
+          "completion_tokens": 502,
+          "tok_per_s": 31.7
+        }
+      },
+      "en_zh": {
+        "ok": false,
+        "error": "Expecting ':' delimiter: line 1 column 364 (char 363)",
+        "raw_excerpt": "{\"translations\":[{\"id\":1,\"target\":\"我们需要谈谈昨天发生的事情。\"},{\"id\":2,\"target\":\"当你把引擎推过八十时，它会过热。\"},{\"id\":3,\"target\":\"她说会在会议开始前回电。\"},{\"id\":4,\"target\":\"这是今晚前往斯德哥尔摩的最后一班火车。\"},{\"id\":5,\"target\":\"我连续三个月一直在做这件事。\"},{\"i",
+        "timing": {
+          "wall_s": 6.76,
+          "completion_tokens": 219,
+          "tok_per_s": 32.4
+        }
+      },
+      "refine_zh_en": {
+        "ok": true,
+        "ids_complete": true,
+        "all_targets_nonempty": true,
+        "extra_keys": []
+      }
+    },
+    "throughput": {
+      "tok_per_s_median": 32.5,
+      "wall_s_median_12seg": 15.4415,
+      "runs": [
+        32.4,
+        32.4,
+        32.5,
+        32.5,
+        32.5,
+        32.7
+      ]
+    }
+  },
+  "bf16_outputs": {
+    "faithful_zh_en": "{\"translations\":[{\"id\":1,\"target\":\"Please generously like, subscribe, share, and reward to support Mingjing and DianDian column. This is the statistics I gathered last week for the fragrance toxin aqueous solution and the fragrance toxin methanol solution, respectively, regarding the solvent they used.\"},{\"id\":2,\"target\":\"That is, there is solvent rearrangement occurring, and the outer solvent invades, resulting in this time situation. The horizontal axis represents the first time when the outer solvent enters and replaces the original solvent.\"},{\"id\":3,\"target\":\"After the recent solvent replacement, the time is shown, and the horizontal axis represents the length of the trajectory, which is the number of occurrences. Here, the average for the aqueous solution is...\"},{\"id\":4,\"target\":\"In terms of the outer water entering the inner layer, the average time is 1.96 milliseconds. For the methanol solution, the time is 3.25 milliseconds.\"},{\"id\":5,\"target\":\"For the methanol aqueous solution and methanol liquid, our simulated time should be different from that of the water simulation. So, for water...\"},{\"id\":6,\"target\":\"The time for methanol should be extended to 4 milliseconds. Overall, 4 milliseconds seems more appropriate. What do you think about this?\"},{\"id\":7,\"target\":\"Should we use a relatively small and fewer exchange time as a reference, or choose the average? You can also select based on your current standard to estimate approximately how many trajectories will occur.\"},{\"id\":8,\"target\":\"Please generously like, subscribe, and reward. Less than 40% is acceptable. Less than 40%, please.\"},{\"id\":9,\"target\":\"If we consider 10%, how long would it take for the exchange to occur? If the exchange ratio is less than 10%, please generously like, subscribe. I need to count...\"},{\"id\":10,\"target\":\"Just give an approximate estimate. Looking at this graph, there should be about 50 trajectories in total, which is 1/14 of 200 trajectories.\"},{\"id\":11,\"target\":\"The time you selected is 2 milliseconds and 4 milliseconds. What length should you simulate for the water? It's 2 milliseconds.\"},{\"id\":12,\"target\":\"Both are 2 milliseconds. Okay, let's use 2 milliseconds for DMSO first.\"}]}",
+    "faithful_en_zh": "{\"translations\":[{\"id\":1,\"target\":\"我们需要谈谈昨天发生的事情。\"},{\"id\":2,\"target\":\"当你把引擎推过八十时，它会过热。\"},{\"id\":3,\"target\":\"她说会在会议开始前回电。\"},{\"id\":4,\"target\":\"这是今晚前往斯德哥尔摩的最后一班火车。\"},{\"id\":5,\"target\":\"我连续三个月一直在做这件事。\"},{\"id\":6,\"target\":\"在第二个交通灯处左转，然后直行。\"},{\"id\":7,\"target\":\"报告说全球运输量下降了十二百分比。\"},{\"id\":8,\"target\":\"你确定我们在离开之前锁了门吗？\"},{\"id\":9,\"target\":\"我的祖母过去每个星期天都会做饺子。\"},{\"id\":10,\"target\",\"id\":10,\"target\":\"在这一集中，我们将参观旧港口区。\"},{\"id\":11,\"target\":\"医生建议在两周内进行手术。\"},{\"id\":12,\"target\":\"没人预料到风暴会这么早到来。\"}]}",
+    "refine_zh_en": "{\"translations\":[{\"id\":1,\"target\":\"Please generously like, subscribe, share, and reward to support Mingjing and DianDian column. This is the statistics I gathered last week for the fragrance toxin aqueous solution and the fragrance toxin methanol solution, respectively, regarding the solvent they used.\"},{\"id\":2,\"target\":\"That is, there is solvent rearrangement occurring, and the outer solvent invades, resulting in this time situation. The horizontal axis represents the first time when the outer solvent enters and replaces the original solvent.\"},{\"id\":3,\"target\":\"After the recent solvent replacement, the time is shown, and the horizontal axis represents the length of the trajectory, which is the number of occurrences. Here, the average for the aqueous solution is...\"},{\"id\":4,\"target\":\"In terms of the outer water entering the inner layer, the average time is 1.96 milliseconds. For the methanol solution, the time is 3.25 milliseconds.\"},{\"id\":5,\"target\":\"For the methanol aqueous solution and methanol liquid, our simulated time should be different from that of the water simulation. So, for water...\"},{\"id\":6,\"target\":\"The time for methanol should be extended to 4 milliseconds. Overall, 4 milliseconds seems more appropriate. What do you think about this?\"},{\"id\":7,\"target\":\"Should we use a relatively small and fewer exchange time as a reference, or choose the average? You can also select based on your current standard to estimate approximately how many trajectories will occur.\"},{\"id\":8,\"target\":\"Please generously like, subscribe, and reward. Less than 40% is acceptable. Less than 40%, please.\"},{\"id\":9,\"target\":\"If we consider 10%, how long would it take for the exchange to occur? If the exchange ratio is less than 10%, please generously like, subscribe. I need to count...\"},{\"id\":10,\"target\":\"Just give an approximate estimate. Looking at this graph, there should be about 50 trajectories in total, which is 1/14 of 200 trajectories.\"},{\"id\":11,\"target\":\"The time you selected is 2 milliseconds and 4 milliseconds. What length should you simulate for the water? It's 2 milliseconds.\"},{\"id\":12,\"target\":\"Both are 2 milliseconds. Okay, let's use 2 milliseconds for DMSO first.\"}]}"
+  }
+}

@@ -198,3 +198,6 @@ external/video-miner/
 
 # default entry workdirs (new pipeline)
 /runs/
+
+# llama.cpp STQ build (V4-7): source tree and build products stay out of git
+/native/llamacpp/llama.cpp/
