@@ -1,24 +1,15 @@
-librosa==0.10.2.post1
-transformers==4.39.3
-numpy==1.26.4
-openai==1.55.3
-opencv-python==4.10.0.84
-openpyxl==3.1.5
-pandas==2.2.3
-pydub==0.25.1
-requests==2.32.3
-spacy==3.7.4
-streamlit==1.38.0
-yt-dlp
-json-repair
-ruamel.yaml
-autocorrect-py
+# New pipeline (videolingo.py + pipeline/) runtime dependencies.
+# The legacy orchestration stack (streamlit, spacy, demucs, whisper,
+# opencv, autocorrect, pydub, ...) was retired with the old core; see git
+# tag legacy-core-last for the previous requirements. The GPU inference
+# stack (torch/transformers/modelscope) mirrors the versions in .venv.
+numpy
 torch>=2.0.0
-torchaudio>=2.0.0
-
-demucs[dev] @ git+https://github.com/adefossez/demucs
-qwen-asr
-
-syllables
-pypinyin
-g2p-en
+transformers>=5.0.0
+modelscope
+soundfile
+openai>=1.0.0
+fastapi
+uvicorn
+ruamel.yaml
+yt-dlp

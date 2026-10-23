@@ -68,7 +68,7 @@ https://github.com/user-attachments/assets/e065fe4c-3694-477f-b4d6-316917df7c0a
 
 ## Usage
 
-**Default entry (new six-stage pipeline):** after installing, copy `config.example.yaml` to `config.yaml` and run one command — no cloud API key needed (self-developed CUDA ASR engine + managed local HY-MT2 translation LLM, word-level timestamps via Qwen3-ForcedAligner):
+**Default entry (six-stage pipeline):** after installing, copy `config.example.yaml` to `config.yaml` and run one command — no cloud API key needed (self-developed CUDA ASR engine + managed local HY-MT2 translation LLM, word-level timestamps via Qwen3-ForcedAligner):
 
 ```bash
 python videolingo.py /path/to/video.mp4      # or a YouTube URL
@@ -76,7 +76,8 @@ python videolingo.py /path/to/video.mp4      # or a YouTube URL
 # subs/{source,target,bilingual}.srt and the burned output.mp4
 ```
 
-**Legacy fallback (old orchestration):** `python translate_video.py <video>` and `streamlit run st.py` keep working unchanged during the transition window.
+The legacy orchestration (Streamlit UI + old CLI) has been retired; the last
+commit carrying it is tagged `legacy-core-last`.
 
 ## Installation
 
