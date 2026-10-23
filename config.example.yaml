@@ -28,10 +28,20 @@ llm:
     # Default ON: the product mandate is a self-contained local stack with no
     # cloud API key (spec v0.4). Set false to fall back to api.* above.
     enabled: true
-    # *HY-MT2-1.8B weights (BF16 safetensors). Downloaded once; never at runtime.
+    # llamacpp: official Q4_K_M GGUF on the STQ-built llama-server (V4-7:
+    # 1.7 GiB/replica, ~285 tok/s per replica). transformers: the BF16
+    # FastAPI fallback (~4.3 GiB/replica, ~32 tok/s).
+    runtime: 'llamacpp'
+    replicas: 2
+    gguf_path: '_model_cache/HY-MT2-1.8B-GGUF/Hy-MT2-1.8B-Q4_K_M.gguf'
+    binary: 'native/llamacpp/llama.cpp/build/bin/llama-server'
+    # Subtitle-serving context bound; the 262K default would pre-allocate
+    # ~18 GiB of KV cache per replica.
+    ctx: 4096
+    # transformers runtime weights (ignored when runtime is llamacpp)
     model_dir: '_model_cache/HY-MT2-1.8B'
     host: '127.0.0.1'
-    # *0 = pick a free port automatically
+    # *0 = pick free ports automatically
     port: 0
     # *Seconds to wait for model load + health before failing explicitly
     startup_timeout_s: 180
@@ -100,7 +110,7 @@ subtitle:
 # New pipeline translation settings
 translation:
   # Segments per LLM request; requests for different batches run concurrently
-  batch_size: 8
+  batch_size: 12
   # Cache LLM responses under <workdir>/.llm-cache
   cache: true
   # *Normalize known ASR garbles before text reaches the local LLM (V4-4).

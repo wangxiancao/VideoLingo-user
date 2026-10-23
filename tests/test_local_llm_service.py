@@ -8,6 +8,7 @@ re-verified in the stage tickets (V4-3/V4-4), not here.
 """
 
 import json
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -56,7 +57,7 @@ def test_stop_is_idempotent(tmp_path):
 def test_stop_terminates_process_group(tmp_path):
     service = make_service(tmp_path)
     service.start()
-    pid = service._process.pid
+    pid = service._replicas[0].process.pid
     service.stop()
     deadline = time.time() + 5
     while time.time() < deadline:
@@ -148,3 +149,115 @@ def test_runner_helper_starts_service_for_llm_stage(tmp_path, monkeypatch):
         assert service is stub and service.is_running()
     finally:
         service.stop()
+
+
+def test_round_robin_distributes_evenly():
+    from pipeline.llm.round_robin import RoundRobinClient
+
+    class Counting:
+        def __init__(self, name):
+            self.name = name
+            self.calls = 0
+
+        def complete(self, system, user):
+            self.calls += 1
+            return self.name
+
+    clients = [Counting(f"c{i}") for i in range(3)]
+    robin = RoundRobinClient(clients)
+    results = [robin.complete("s", "u") for _ in range(9)]
+    assert [client.calls for client in clients] == [3, 3, 3]
+    assert results == ["c0", "c1", "c2"] * 3
+
+
+def test_round_robin_thread_safe_under_concurrency():
+    from concurrent.futures import ThreadPoolExecutor
+
+    from pipeline.llm.round_robin import RoundRobinClient
+
+    class Counting:
+        def __init__(self):
+            self.calls = 0
+            self.lock = threading.Lock()
+
+        def complete(self, system, user):
+            with self.lock:
+                self.calls += 1
+            return "x"
+
+    clients = [Counting() for _ in range(4)]
+    robin = RoundRobinClient(clients)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda _: robin.complete("s", "u"), range(200)))
+    total = sum(client.calls for client in clients)
+    assert total == 200
+    assert max(client.calls for client in clients) - \
+        min(client.calls for client in clients) <= 1
+
+
+def test_multi_replica_lifecycle_and_roundrobin_client(tmp_path):
+    service = make_service(tmp_path, replicas=3)
+    service.start()
+    try:
+        assert service.is_running()
+        ports = [replica.port for replica in service._replicas]
+        assert len(set(ports)) == 3 and all(p != 0 for p in ports)
+        client = service.client()
+        from pipeline.llm.round_robin import RoundRobinClient
+        assert isinstance(client, RoundRobinClient)
+        assert client.complete("s", "u")  # stub JSON round-trips
+    finally:
+        service.stop()
+    assert not service.is_running()
+    assert service.shutdown_seconds is not None
+
+
+def test_replica_failure_stops_siblings(tmp_path):
+    blocker = make_service(tmp_path)
+    blocker.start()
+    try:
+        # first replica pinned to an occupied port -> startup failure must
+        # tear down any already-started siblings and surface the error
+        service = make_service(tmp_path, replicas=2, port=blocker.port)
+        with pytest.raises(LlmError):
+            service.start()
+        assert service._replicas == []
+    finally:
+        blocker.stop()
+
+
+def test_llamacpp_command_shape():
+    from pipeline.llm.local_service import _llamacpp_command
+
+    command = _llamacpp_command("bin/llama-server", "m.gguf", "127.0.0.1",
+                                9940, 4096)
+    assert command[:4] == ["bin/llama-server", "-m", "m.gguf", "-ngl"]
+    assert "--jinja" in command
+    assert command[command.index("-c") + 1] == "4096"
+    assert command[command.index("-np") + 1] == "1"
+    assert command[command.index("--repeat-penalty") + 1] == "1.0"
+    assert command[command.index("--port") + 1] == "9940"
+
+
+def test_llamacpp_missing_assets_fail_explicitly(tmp_path):
+    from pipeline.llm.local_service import LocalLlmService
+
+    service = LocalLlmService(runtime="llamacpp", replicas=1,
+                              binary=tmp_path / "no-binary",
+                              gguf=tmp_path / "no-model.gguf")
+    with pytest.raises(MissingInputError, match="llama-server binary"):
+        service.start()
+    service = LocalLlmService(runtime="llamacpp", replicas=1,
+                              binary="native/llamacpp/llama.cpp/build/bin/llama-server",
+                              gguf=tmp_path / "no-model.gguf")
+    with pytest.raises(MissingInputError, match="gguf"):
+        service.start()
+
+
+def test_invalid_runtime_and_replicas_rejected():
+    from pipeline.llm.local_service import LocalLlmService
+
+    with pytest.raises(ConfigError, match="runtime"):
+        LocalLlmService(runtime="vllm")
+    with pytest.raises(ConfigError, match="replicas"):
+        LocalLlmService(replicas=0)
